@@ -2,7 +2,7 @@
     <h1>  Point or Line? Using Line-based Representation for Panoptic Symbol Spotting in CAD Drawings </h1>
     <div align="center">
         <a href='https://arxiv.org/abs/2505.23395'><img src='https://img.shields.io/badge/arXiv-2505.23395-b31b1b?logo=arXiv'></a> &nbsp;&nbsp;&nbsp;&nbsp;
-        <a href='https://hmwang2002.github.io/release/vecformer/'><img src='https://img.shields.io/badge/Project-Page-Green'></a>
+        <a href='http://home.weskwong.tech/releases/vecformer/'><img src='https://img.shields.io/badge/Project-Page-Green'></a>
     </div>
     <img src="assets/overview.png" width="95%"/>
 </div>
