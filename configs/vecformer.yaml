@@ -5,6 +5,7 @@ logging_steps: 200
 logging_first_step: true
 report_to:
     - tensorboard
+    - wandb
 
 # ------------------------- train ------------------------ #
 num_train_epochs: 500
