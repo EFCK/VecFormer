@@ -1,6 +1,6 @@
 dataset_name: floorplancad
 dataset_args:
-    root_dir: datasets/FloorPlanCAD-sampled-as-line-jsons # 使用线采样
+    root_dir: /temp/FloorPlanCAD-sampled-as-line-jsons # 使用线采样
     train_transform_args:
         random_vertical_flip: 0.5
         random_horizontal_flip: 0.5
