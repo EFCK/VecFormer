@@ -6,6 +6,7 @@ import json
 import torch
 from transformers.trainer import EvalPrediction
 
+
 @dataclass
 class EvaluatorConfig:
     num_classes: int
@@ -21,9 +22,11 @@ class Evaluator:
         self.ignore_label = config.ignore_label
         self.iou_threshold = config.iou_threshold
         self.output_dir = config.output_dir
-        
+
     def __call__(self, preds, targets):
-        return self.eval_panoptic_quality(preds, targets), self.eval_semantic_quality(preds["pred_sem_segs"], targets["sem_labels"], targets["prim_lens"])
+        return self.eval_panoptic_quality(preds, targets), self.eval_semantic_quality(
+            preds["pred_sem_segs"], targets["sem_labels"], targets["prim_lens"]
+        )
 
     def eval_panoptic_quality(self, preds, targets):
         """
@@ -72,10 +75,18 @@ class Evaluator:
                 \\- `tp_iou_score_per_class` (`torch.Tensor`, shape is (num_classes,)): Summary of True positive IoU score for each class
         """
         # Initialize the metric states
-        tp_per_class = torch.zeros(self.num_classes, dtype=torch.int32, device=preds["pred_masks"][0].device)
-        fp_per_class = torch.zeros(self.num_classes, dtype=torch.int32, device=preds["pred_masks"][0].device)
-        fn_per_class = torch.zeros(self.num_classes, dtype=torch.int32, device=preds["pred_masks"][0].device)
-        tp_iou_score_per_class = torch.zeros(self.num_classes, dtype=torch.float32, device=preds["pred_masks"][0].device)
+        tp_per_class = torch.zeros(
+            self.num_classes, dtype=torch.int32, device=preds["pred_masks"][0].device
+        )
+        fp_per_class = torch.zeros(
+            self.num_classes, dtype=torch.int32, device=preds["pred_masks"][0].device
+        )
+        fn_per_class = torch.zeros(
+            self.num_classes, dtype=torch.int32, device=preds["pred_masks"][0].device
+        )
+        tp_iou_score_per_class = torch.zeros(
+            self.num_classes, dtype=torch.float32, device=preds["pred_masks"][0].device
+        )
         # Log lengths to degrade the influence of lines with very large span. (Follow the FloorPlanCAD paper)
         log_prim_lens = [torch.log(1 + prim_len) for prim_len in targets["prim_lens"]]
         # Iterate over all batches
@@ -95,12 +106,12 @@ class Evaluator:
                     pred_label = preds["pred_labels"][batch_idx][pred_idx]
                     # Ignore the predicted instance with ignore label
                     # In FloorPlanCAD dataset, the ignore label means the background
-                    if pred_label == self.ignore_label: # ignore the background
+                    if pred_label == self.ignore_label:  # ignore the background
                         continue
                     # Calculate the IoU between the predicted instance and the ground truth instance
                     iou = self._calculate_primitive_iou(
-                        pred_mask, target_mask,
-                        log_prim_lens[batch_idx])
+                        pred_mask, target_mask, log_prim_lens[batch_idx]
+                    )
                     if iou > self.iou_threshold:
                         found_match = True
                         if pred_label == target_label:
@@ -114,10 +125,12 @@ class Evaluator:
             tp_per_class=tp_per_class,
             fp_per_class=fp_per_class,
             fn_per_class=fn_per_class,
-            tp_iou_score_per_class=tp_iou_score_per_class
+            tp_iou_score_per_class=tp_iou_score_per_class,
         )
 
-    def eval_semantic_quality(self, list_pred_sem_labels, list_target_sem_labels, list_primitive_lens):
+    def eval_semantic_quality(
+        self, list_pred_sem_labels, list_target_sem_labels, list_primitive_lens
+    ):
         """
         Calculate semantic symbol spotting metrics: F1, wF1
 
@@ -140,20 +153,46 @@ class Evaluator:
                 `w_pred_per_class` (`torch.Tensor`, shape is (num_classes + 1,)): Number of predicted instances for each class
                 `w_gt_per_class` (`torch.Tensor`, shape is (num_classes + 1,)): Number of ground truth instances for each class
         """
-        tp_per_class = torch.zeros(self.num_classes + 1, dtype=torch.int32, device=list_pred_sem_labels[0].device)
-        pred_per_class = torch.zeros(self.num_classes + 1, dtype=torch.int32, device=list_pred_sem_labels[0].device)
-        gt_per_class = torch.zeros(self.num_classes + 1, dtype=torch.int32, device=list_pred_sem_labels[0].device)
-        
-        w_tp_per_class = torch.zeros(self.num_classes + 1, dtype=torch.float32, device=list_pred_sem_labels[0].device)
-        w_pred_per_class = torch.zeros(self.num_classes + 1, dtype=torch.float32, device=list_pred_sem_labels[0].device)
-        w_gt_per_class = torch.zeros(self.num_classes + 1, dtype=torch.float32, device=list_pred_sem_labels[0].device)
-        
-        for pred_sem_labels, target_sem_labels, primitive_lens in zip(list_pred_sem_labels, list_target_sem_labels, list_primitive_lens):
+        tp_per_class = torch.zeros(
+            self.num_classes + 1,
+            dtype=torch.int32,
+            device=list_pred_sem_labels[0].device,
+        )
+        pred_per_class = torch.zeros(
+            self.num_classes + 1,
+            dtype=torch.int32,
+            device=list_pred_sem_labels[0].device,
+        )
+        gt_per_class = torch.zeros(
+            self.num_classes + 1,
+            dtype=torch.int32,
+            device=list_pred_sem_labels[0].device,
+        )
+
+        w_tp_per_class = torch.zeros(
+            self.num_classes + 1,
+            dtype=torch.float32,
+            device=list_pred_sem_labels[0].device,
+        )
+        w_pred_per_class = torch.zeros(
+            self.num_classes + 1,
+            dtype=torch.float32,
+            device=list_pred_sem_labels[0].device,
+        )
+        w_gt_per_class = torch.zeros(
+            self.num_classes + 1,
+            dtype=torch.float32,
+            device=list_pred_sem_labels[0].device,
+        )
+
+        for pred_sem_labels, target_sem_labels, primitive_lens in zip(
+            list_pred_sem_labels, list_target_sem_labels, list_primitive_lens
+        ):
             for i in range(pred_sem_labels.shape[0]):
                 pred_sem_label = pred_sem_labels[i]
                 target_sem_label = target_sem_labels[i]
                 primitive_length = primitive_lens[i]
-                
+
                 pred_per_class[pred_sem_label] += 1
                 gt_per_class[target_sem_label] += 1
                 w_pred_per_class[pred_sem_label] += primitive_length
@@ -162,14 +201,14 @@ class Evaluator:
                 if pred_sem_label == target_sem_label:
                     tp_per_class[pred_sem_label] += 1
                     w_tp_per_class[pred_sem_label] += primitive_length
-                
+
         return dict(
             tp_per_class=tp_per_class,
             pred_per_class=pred_per_class,
             gt_per_class=gt_per_class,
             w_tp_per_class=w_tp_per_class,
             w_pred_per_class=w_pred_per_class,
-            w_gt_per_class=w_gt_per_class
+            w_gt_per_class=w_gt_per_class,
         )
 
     def eval_instance_quality(self, preds, data_paths):
@@ -192,7 +231,7 @@ class Evaluator:
             data_split, data_name = data_path.split("/")[-2:]
             output_path = os.path.join(self.output_dir, data_split, data_name)
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            
+
             """
             output json format:
             {
@@ -212,15 +251,11 @@ class Evaluator:
                 pred_mask = pred_masks[idx]
                 # 获得pred_mask中1的值的索引
                 primitive_ids = pred_mask.nonzero(as_tuple=True)[0].cpu().tolist()
-                output["pred_instances"].append({
-                    "primitive_ids": primitive_ids,
-                    "label": pred_label,
-                    "score": 1.0
-                })
+                output["pred_instances"].append(
+                    {"primitive_ids": primitive_ids, "label": pred_label, "score": 1.0}
+                )
             with open(output_path, "w") as f:
                 json.dump(output, f)
-                
-
 
     def _calculate_primitive_iou(self, pred_mask, target_mask, primitive_length):
         """
@@ -241,8 +276,12 @@ class Evaluator:
 
             `torch.Tensor`: IoU between the predicted instance and the ground truth instance
         """
-        inter_area = torch.sum(primitive_length[torch.logical_and(pred_mask, target_mask)])
-        union_area = torch.sum(primitive_length[torch.logical_or(pred_mask, target_mask)])
+        inter_area = torch.sum(
+            primitive_length[torch.logical_and(pred_mask, target_mask)]
+        )
+        union_area = torch.sum(
+            primitive_length[torch.logical_or(pred_mask, target_mask)]
+        )
         iou = inter_area / (union_area + torch.finfo(union_area.dtype).eps)
         return iou
 
@@ -252,19 +291,22 @@ class MetricsComputerConfig:
     num_classes: int
     thing_class_idxs: List[int]
     stuff_class_idxs: List[int]
+    log_per_class_metrics: bool = False
 
 
 class MetricsComputer:
-
     def __init__(self, config: MetricsComputerConfig) -> None:
         self.num_classes = config.num_classes
         self.thing_class_idxs = config.thing_class_idxs
         self.stuff_class_idxs = config.stuff_class_idxs
+        self.log_per_class_metrics = config.log_per_class_metrics
         self.dict_sublosses = {}
         self.metric_states = {}
         self.f1_states = {}
 
-    def __call__(self, eval_pred: EvalPrediction, compute_result: bool = False) -> Mapping[str, float]:
+    def __call__(
+        self, eval_pred: EvalPrediction, compute_result: bool = False
+    ) -> Mapping[str, float]:
         outputs, labels = eval_pred
         dict_sublosses, metric_states, f1_states = outputs
 
@@ -278,21 +320,27 @@ class MetricsComputer:
         metrics.update(self._compute_panoptic_quality())
         metrics.update(self._compute_f1_scores())
         return metrics
-    
+
     def _update_f1_states(self, f1_states: Dict[str, torch.Tensor]) -> None:
         for key, value in f1_states.items():
             if key not in self.f1_states:
-                self.f1_states[key] = \
-                    torch.tensor(value).reshape(-1, len(self.thing_class_idxs + self.stuff_class_idxs) + 1).sum(dim=0)
+                self.f1_states[key] = (
+                    torch.tensor(value)
+                    .reshape(-1, len(self.thing_class_idxs + self.stuff_class_idxs) + 1)
+                    .sum(dim=0)
+                )
             else:
-                self.f1_states[key] += \
-                    torch.tensor(value).reshape(-1, len(self.thing_class_idxs + self.stuff_class_idxs) + 1).sum(dim=0)
-    
+                self.f1_states[key] += (
+                    torch.tensor(value)
+                    .reshape(-1, len(self.thing_class_idxs + self.stuff_class_idxs) + 1)
+                    .sum(dim=0)
+                )
+
     def _compute_f1_scores(self) -> Dict[str, float]:
         results = {}
         eps = torch.finfo(torch.float32).eps
         # calculate total F1 and wF1
-        
+
         tp = self.f1_states["tp_per_class"].sum()
         pred = self.f1_states["pred_per_class"].sum()
         gt = self.f1_states["gt_per_class"].sum()
@@ -300,7 +348,7 @@ class MetricsComputer:
         recall = tp / (gt + eps)
         f1 = 2 * precision * recall / (precision + recall + eps)
         results["F1"] = f1.item()
-        
+
         w_tp = self.f1_states["w_tp_per_class"].sum()
         w_pred = self.f1_states["w_pred_per_class"].sum()
         w_gt = self.f1_states["w_gt_per_class"].sum()
@@ -308,26 +356,47 @@ class MetricsComputer:
         w_recall = w_tp / (w_gt + eps)
         w_f1 = 2 * w_precision * w_recall / (w_precision + w_recall + eps)
         results["wF1"] = w_f1.item()
-        
+
         # calculate each class F1 and wF1
-        for i in range(self.num_classes):
-            precision_i = self.f1_states["tp_per_class"][i] / (self.f1_states["pred_per_class"][i] + eps)
-            recall_i = self.f1_states["tp_per_class"][i] / (self.f1_states["gt_per_class"][i] + eps)
-            f1_i = 2 * precision_i * recall_i / (precision_i + recall_i + eps)
-            results[f"class_{i + 1}_F1"] = f1_i.item()
-            w_precision_i = self.f1_states["w_tp_per_class"][i] / (self.f1_states["w_pred_per_class"][i] + eps)
-            w_recall_i = self.f1_states["w_tp_per_class"][i] / (self.f1_states["w_gt_per_class"][i] + eps)
-            w_f1_i = 2 * w_precision_i * w_recall_i / (w_precision_i + w_recall_i + eps)
-            results[f"class_{i + 1}_wF1"] = w_f1_i.item()
-        precision_bg = self.f1_states["tp_per_class"][-1] / (self.f1_states["pred_per_class"][-1] + eps)
-        recall_bg = self.f1_states["tp_per_class"][-1] / (self.f1_states["gt_per_class"][-1] + eps)
-        f1_bg = 2 * precision_bg * recall_bg / (precision_bg + recall_bg + eps)
-        results["class_bg_F1"] = f1_bg.item()
-        w_precision_bg = self.f1_states["w_tp_per_class"][-1] / (self.f1_states["w_pred_per_class"][-1] + eps)
-        w_recall_bg = self.f1_states["w_tp_per_class"][-1] / (self.f1_states["w_gt_per_class"][-1] + eps)
-        w_f1_bg = 2 * w_precision_bg * w_recall_bg / (w_precision_bg + w_recall_bg + eps)
-        results["class_bg_wF1"] = w_f1_bg.item()
-        
+        if self.log_per_class_metrics:
+            for i in range(self.num_classes):
+                precision_i = self.f1_states["tp_per_class"][i] / (
+                    self.f1_states["pred_per_class"][i] + eps
+                )
+                recall_i = self.f1_states["tp_per_class"][i] / (
+                    self.f1_states["gt_per_class"][i] + eps
+                )
+                f1_i = 2 * precision_i * recall_i / (precision_i + recall_i + eps)
+                results[f"class_{i + 1}_F1"] = f1_i.item()
+                w_precision_i = self.f1_states["w_tp_per_class"][i] / (
+                    self.f1_states["w_pred_per_class"][i] + eps
+                )
+                w_recall_i = self.f1_states["w_tp_per_class"][i] / (
+                    self.f1_states["w_gt_per_class"][i] + eps
+                )
+                w_f1_i = (
+                    2 * w_precision_i * w_recall_i / (w_precision_i + w_recall_i + eps)
+                )
+                results[f"class_{i + 1}_wF1"] = w_f1_i.item()
+            precision_bg = self.f1_states["tp_per_class"][-1] / (
+                self.f1_states["pred_per_class"][-1] + eps
+            )
+            recall_bg = self.f1_states["tp_per_class"][-1] / (
+                self.f1_states["gt_per_class"][-1] + eps
+            )
+            f1_bg = 2 * precision_bg * recall_bg / (precision_bg + recall_bg + eps)
+            results["class_bg_F1"] = f1_bg.item()
+            w_precision_bg = self.f1_states["w_tp_per_class"][-1] / (
+                self.f1_states["w_pred_per_class"][-1] + eps
+            )
+            w_recall_bg = self.f1_states["w_tp_per_class"][-1] / (
+                self.f1_states["w_gt_per_class"][-1] + eps
+            )
+            w_f1_bg = (
+                2 * w_precision_bg * w_recall_bg / (w_precision_bg + w_recall_bg + eps)
+            )
+            results["class_bg_wF1"] = w_f1_bg.item()
+
         self.f1_states.clear()
         return results
 
@@ -336,7 +405,7 @@ class MetricsComputer:
             if key not in self.dict_sublosses:
                 self.dict_sublosses[key] = {
                     "count": len(value),
-                    "sum": value.sum().item()
+                    "sum": value.sum().item(),
                 }
             else:
                 self.dict_sublosses[key]["count"] += len(value)
@@ -352,11 +421,17 @@ class MetricsComputer:
     def _update_metric_states(self, metric_states: Dict[str, torch.Tensor]) -> None:
         for key, value in metric_states.items():
             if key not in self.metric_states:
-                self.metric_states[key] = \
-                    torch.tensor(value).reshape(-1, len(self.thing_class_idxs + self.stuff_class_idxs)).sum(dim=0)
+                self.metric_states[key] = (
+                    torch.tensor(value)
+                    .reshape(-1, len(self.thing_class_idxs + self.stuff_class_idxs))
+                    .sum(dim=0)
+                )
             else:
-                self.metric_states[key] += \
-                    torch.tensor(value).reshape(-1, len(self.thing_class_idxs + self.stuff_class_idxs)).sum(dim=0)
+                self.metric_states[key] += (
+                    torch.tensor(value)
+                    .reshape(-1, len(self.thing_class_idxs + self.stuff_class_idxs))
+                    .sum(dim=0)
+                )
 
     def _compute_panoptic_quality(self):
         """
@@ -398,7 +473,9 @@ class MetricsComputer:
         tp_per_class = metric_states["tp_per_class"].to(torch.float32)
         fp_per_class = metric_states["fp_per_class"].to(torch.float32)
         fn_per_class = metric_states["fn_per_class"].to(torch.float32)
-        tp_iou_score_per_class = metric_states["tp_iou_score_per_class"].to(torch.float32)
+        tp_iou_score_per_class = metric_states["tp_iou_score_per_class"].to(
+            torch.float32
+        )
         eps = torch.finfo(torch.float32).eps
 
         def cal_scores(tp, fp, fn, tp_iou_score):
@@ -408,38 +485,49 @@ class MetricsComputer:
             return pq, sq, rq
 
         pq_per_class, sq_per_class, rq_per_class = cal_scores(
-            tp_per_class, fp_per_class, fn_per_class, tp_iou_score_per_class)
+            tp_per_class, fp_per_class, fn_per_class, tp_iou_score_per_class
+        )
 
-        class_metrics = {f"class_{id+1}_PQ": pq.item()*100 for id, pq in enumerate(pq_per_class)}
+        class_metrics = {}
+        if self.log_per_class_metrics:
+            class_metrics = {
+                f"class_{id + 1}_PQ": pq.item() * 100
+                for id, pq in enumerate(pq_per_class)
+            }
 
         thing_pq, thing_sq, thing_rq = cal_scores(
             tp_per_class[thing_class_idxs].sum(),
             fp_per_class[thing_class_idxs].sum(),
             fn_per_class[thing_class_idxs].sum(),
-            tp_iou_score_per_class[thing_class_idxs].sum())
+            tp_iou_score_per_class[thing_class_idxs].sum(),
+        )
 
         stuff_pq, stuff_sq, stuff_rq = cal_scores(
             tp_per_class[stuff_class_idxs].sum(),
             fp_per_class[stuff_class_idxs].sum(),
             fn_per_class[stuff_class_idxs].sum(),
-            tp_iou_score_per_class[stuff_class_idxs].sum())
+            tp_iou_score_per_class[stuff_class_idxs].sum(),
+        )
 
-        pq, sq, rq = cal_scores(tp_per_class.sum(), fp_per_class.sum(),
-                                fn_per_class.sum(),
-                                tp_iou_score_per_class.sum())
+        pq, sq, rq = cal_scores(
+            tp_per_class.sum(),
+            fp_per_class.sum(),
+            fn_per_class.sum(),
+            tp_iou_score_per_class.sum(),
+        )
 
         self.metric_states.clear()
 
         metrics = {
-            "PQ": pq.item()*100,
-            "SQ": sq.item()*100,
-            "RQ": rq.item()*100,
-            "thing_PQ": thing_pq.item()*100,
-            "thing_SQ": thing_sq.item()*100,
-            "thing_RQ": thing_rq.item()*100,
-            "stuff_PQ": stuff_pq.item()*100,
-            "stuff_SQ": stuff_sq.item()*100,
-            "stuff_RQ": stuff_rq.item()*100,
+            "PQ": pq.item() * 100,
+            "SQ": sq.item() * 100,
+            "RQ": rq.item() * 100,
+            "thing_PQ": thing_pq.item() * 100,
+            "thing_SQ": thing_sq.item() * 100,
+            "thing_RQ": thing_rq.item() * 100,
+            "stuff_PQ": stuff_pq.item() * 100,
+            "stuff_SQ": stuff_sq.item() * 100,
+            "stuff_RQ": stuff_rq.item() * 100,
         }
         metrics.update(class_metrics)
 

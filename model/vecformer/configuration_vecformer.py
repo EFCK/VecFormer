@@ -1,25 +1,26 @@
 """
 VecFormer configuration
 """
+
 from transformers import PretrainedConfig
 
 
 class VecFormerConfig(PretrainedConfig):
-    model_type='vecformer'
+    model_type = "vecformer"
 
     def __init__(
         self,
-        num_instance_classes: int = 35, # number of instance classes of dataset
-        num_semantic_classes: int = 35, # number of semantic classes of dataset
-        thing_class_idxs: list[int] = [i for i in range(30)], # thing class idxs
-        stuff_class_idxs: list[int] = [30,31,32,33,34], # stuff class idxs
-        use_layer_fusion: bool = True, # (`bool`): whether to use layer fusion enhancement
-        query_thr = 0.5, # (`float`): query threshold, used only in training
-        max_num_queries = -1, # (`int`): max number of queries, used only in training
+        num_instance_classes: int = 35,  # number of instance classes of dataset
+        num_semantic_classes: int = 35,  # number of semantic classes of dataset
+        thing_class_idxs: list[int] = [i for i in range(30)],  # thing class idxs
+        stuff_class_idxs: list[int] = [30, 31, 32, 33, 34],  # stuff class idxs
+        use_layer_fusion: bool = True,  # (`bool`): whether to use layer fusion enhancement
+        query_thr=0.5,  # (`float`): query threshold, used only in training
+        max_num_queries=-1,  # (`int`): max number of queries, used only in training
         # VecFormer Backbone
-        sample_mode = "line", # (`str`): sample mode, "line" or "point"
+        sample_mode="line",  # (`str`): sample mode, "line" or "point"
         backbone_config: dict = dict(
-            in_channels=7, # point mode: 4, line mode: 7
+            in_channels=7,  # point mode: 4, line mode: 7
             order=("z", "z-trans", "hilbert", "hilbert-trans"),
             stride=(2, 2, 2, 2),
             enc_depths=(2, 2, 2, 6, 2),
@@ -51,19 +52,19 @@ class VecFormerConfig(PretrainedConfig):
         ),
         # CAD Decoder
         cad_decoder_config: dict = dict(
-            num_instance_classes = None, # (`int`): number of instance classes
-            num_semantic_classes = None, # (`int`): number of semantic classes
-            input_dim = 64, # (`int`): input dimension of CAD decoder
-            embed_dim = 256, # (`int`): embedding dimension of CAD decoder
-            activation = "GELU", # (`str`): activation function
-            dropout = 0.1, # (`float`): dropout rate
-            n_heads = 8, # (`int`): number of attention heads
-            n_blocks = 6, # (`int`): number of blocks in CAD decoder
-            attn_drop = 0.1, # (`float`): attention drop rate
-            objectiveness_flag = False, # (`bool`): flag to indicate if CAD decoder should predict objectiveness
-            iter_pred = True, # (`bool`): whether to use every cad decoder block to predict
-            only_last_block_sem = True, # (`bool`): only use the last block to predict semantic
-            use_attn_mask = False, # (`bool`): whether to use attention mask in CAD decoder
+            num_instance_classes=None,  # (`int`): number of instance classes
+            num_semantic_classes=None,  # (`int`): number of semantic classes
+            input_dim=64,  # (`int`): input dimension of CAD decoder
+            embed_dim=256,  # (`int`): embedding dimension of CAD decoder
+            activation="GELU",  # (`str`): activation function
+            dropout=0.1,  # (`float`): dropout rate
+            n_heads=8,  # (`int`): number of attention heads
+            n_blocks=6,  # (`int`): number of blocks in CAD decoder
+            attn_drop=0.1,  # (`float`): attention drop rate
+            objectiveness_flag=False,  # (`bool`): flag to indicate if CAD decoder should predict objectiveness
+            iter_pred=True,  # (`bool`): whether to use every cad decoder block to predict
+            only_last_block_sem=True,  # (`bool`): only use the last block to predict semantic
+            use_attn_mask=False,  # (`bool`): whether to use attention mask in CAD decoder
             # use_layer_fusion = True, # (`bool`): whether to use layer fusion enhancement in CAD decoder
         ),
         # Criterion
@@ -78,37 +79,38 @@ class VecFormerConfig(PretrainedConfig):
             "iter_matcher": True,
             "label_smoothing": 0.1,
             "use_mean_batch_loss": True,
-        }, # instance loss config
+        },  # instance loss config
         semantic_criterion_config: dict = {
             "num_semantic_classes": None,
             "ce_loss_weight": 5.0,
             "ce_unlabeled_weight": 0.1,
             "label_smoothing": 0.1,
             "use_mean_batch_loss": True,
-        }, # semantic loss config
-        num_topk_preds: int = 600, # number of topk predictions
-        use_obj_normalization: bool = True, # whether to use object normalization
-        obj_normalization_thr: float = 0.01, # object normalization threshold
-        use_vector_nms: bool = True, # whether to use vector nms
-        vector_nms_kernel: str = "linear", # vector nms kernel
-        pred_score_thr: float = 0.5, # predicted score threshold, used in pred_score > pred_score_thr to filter out low-confidence predictions
-        mask_logit_thr: float = 0.3, # mask logit threshold, used in pred_masks_sigmoid > mask_logit_thr to get 0/1 mask
-        n_primitives_thr: int = 1, # number of primitives threshold
-        whether_output_instance: bool = False, # whether to output instance predictions
+        },  # semantic loss config
+        num_topk_preds: int = 600,  # number of topk predictions
+        use_obj_normalization: bool = True,  # whether to use object normalization
+        obj_normalization_thr: float = 0.01,  # object normalization threshold
+        use_vector_nms: bool = True,  # whether to use vector nms
+        vector_nms_kernel: str = "linear",  # vector nms kernel
+        pred_score_thr: float = 0.5,  # predicted score threshold, used in pred_score > pred_score_thr to filter out low-confidence predictions
+        mask_logit_thr: float = 0.3,  # mask logit threshold, used in pred_masks_sigmoid > mask_logit_thr to get 0/1 mask
+        n_primitives_thr: int = 1,  # number of primitives threshold
+        whether_output_instance: bool = False,  # whether to output instance predictions
         # Evaluator
         evaluator_config: dict = {
             "num_classes": None,
             "iou_threshold": 0.5,
             "ignore_label": None,
-            "output_dir": "instance_preds/"
-        }, # evaluator config
+            "output_dir": "instance_preds/",
+        },  # evaluator config
         # MetricsComputer
         metrics_computer_config: dict = {
             "num_classes": None,
             "thing_class_idxs": None,
-            "stuff_class_idxs": None
-        }, # metrics computer config
-        **kwargs
+            "stuff_class_idxs": None,
+            "log_per_class_metrics": False,
+        },  # metrics computer config
+        **kwargs,
     ):
         super().__init__(**kwargs)
 

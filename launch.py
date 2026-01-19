@@ -159,6 +159,15 @@ def main():
             logger.info(f"Resuming from checkpoint: {checkpoint}")
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         trainer.log_metrics("train", train_result.metrics)
+    # ------------------ resume train ------------------ #
+    if training_args.launch_mode == "resume":
+        if training_args.resume_from_checkpoint is None:
+            raise ValueError("resume_from_checkpoint is required for resume mode")
+        logger.info(f"Resuming from checkpoint: {training_args.resume_from_checkpoint}")
+        train_result = trainer.train(
+            resume_from_checkpoint=training_args.resume_from_checkpoint
+        )
+        trainer.log_metrics("train", train_result.metrics)
     # ------------------ continue train ------------------ #
     if training_args.launch_mode == "continue":
         if training_args.resume_from_checkpoint is None:
@@ -178,7 +187,7 @@ def main():
         metrics = trainer.evaluate()
         trainer.log_metrics("eval", metrics)
     # ---------------------------------------------------- #
-    if training_args.launch_mode not in ["train", "continue", "test"]:
+    if training_args.launch_mode not in ["train", "resume", "continue", "test"]:
         raise ValueError(f"Invalid launch mode: {training_args.launch_mode}")
     # ------------------- finish wandb ------------------- #
     finish_wandb()
