@@ -65,3 +65,4 @@ Thumbs.db
 # Output
 instance_preds/
 *.cocojson
+/configs/cp1
