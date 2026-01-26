@@ -21,6 +21,37 @@ def is_main_process():
     return not dist.is_initialized() or dist.get_rank() == 0
 
 
+class LogHistoryCleanupCallback(TrainerCallback):
+    """
+    Callback to prevent trainer_state.json from bloating.
+
+    HuggingFace Trainer accumulates all logs in state.log_history, which gets
+    saved to trainer_state.json on every checkpoint. For long training runs
+    (e.g., 100 epochs with logging every 50 steps), this can grow to tens of
+    thousands of entries, causing memory issues and slow checkpoint saves.
+
+    This callback keeps only evaluation logs in the history, removing training
+    step logs which are already sent to wandb/tensorboard.
+    """
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        """Clean up log_history after each log event"""
+        if not state.is_world_process_zero:
+            return
+
+        # Keep only evaluation logs (those with 'eval_' keys) in log_history
+        # Training step logs are still visible in wandb/tensorboard, just not
+        # saved to trainer_state.json
+        if state.log_history:
+            eval_logs = [
+                log
+                for log in state.log_history
+                if any(key.startswith("eval_") for key in log.keys())
+            ]
+            state.log_history.clear()
+            state.log_history.extend(eval_logs)
+
+
 class WandbBestMetricCallback(TrainerCallback):
     """Callback to track and log best metrics to wandb"""
 
@@ -91,6 +122,10 @@ class VecFormerTrainer(Trainer):
                 WandbBestMetricCallback(metric_for_best_model=metric_for_best)
             )
 
+        # Add callback to prevent trainer_state.json from bloating
+        # This removes training step logs from state.log_history, keeping only eval logs
+        self.add_callback(LogHistoryCleanupCallback())
+
     def log(self, logs: Dict[str, float], start_time: Optional[float] = None) -> None:
         # ----------- hack to log multiple loss ---------- #
         if self.custom_logs_is_training:
@@ -131,13 +166,28 @@ class VecFormerTrainer(Trainer):
         # ------------------------------------------------ #
         return (loss, outputs) if return_outputs else loss
 
-    def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys):
+    def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
         # hack to handle `nested_detach` stuck in huggingface trainer
         losses, logits, _ = super().prediction_step(
             model, inputs, prediction_loss_only, ignore_keys
         )
+        # Handle case where losses could be None
+        if losses is not None:
+            device = losses.device
+        elif logits is not None:
+            # Try to get device from logits
+            if isinstance(logits, torch.Tensor):
+                device = logits.device
+            elif isinstance(logits, (tuple, list)) and len(logits) > 0:
+                device = (
+                    logits[0].device if isinstance(logits[0], torch.Tensor) else "cuda"
+                )
+            else:
+                device = "cuda"
+        else:
+            device = "cuda"
         return (
             losses,
             logits,
-            torch.tensor(0.0, dtype=torch.float32, device=losses.device),
+            torch.tensor(0.0, dtype=torch.float32, device=device),
         )
