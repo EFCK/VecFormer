@@ -64,7 +64,9 @@ class PatchedPrinterCallback(PrinterCallback):
 
     def on_log(self, args, state, control, logs=None, **kwargs):
         add_train_message(logs, state, self.start_time)
-        if state.is_world_process_zero:
+        # Only save evaluation logs to JSONL file (not training step logs)
+        is_eval_log = any(key.startswith('eval_') for key in logs.keys())
+        if state.is_world_process_zero and is_eval_log:
             jsonl_path = os.path.join(args.output_dir, 'logging.jsonl')
             append_to_jsonl(jsonl_path, logs)
 
