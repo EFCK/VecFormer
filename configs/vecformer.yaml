@@ -31,5 +31,6 @@ metric_for_best_model: PQ
 save_strategy: best
 
 # ------------------------- data ------------------------- #
-dataloader_num_workers: 64
+# For colab 2-4 workers is better. In local, use higher values (64).
+dataloader_num_workers: 4
 dataloader_drop_last: true # TODO!: if false, the eval step will have some strange bugs, wait to fix
