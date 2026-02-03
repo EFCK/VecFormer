@@ -67,3 +67,5 @@ instance_preds/
 *.cocojson
 /configs/cp1
 /configs/checkpoint-60935
+/configs/cp2
+/configs/cp3
