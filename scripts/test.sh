@@ -6,7 +6,7 @@ export OUTPUT_DIR=${OUTPUT_DIR:-"outputs"}
 
 export NODE_RANK=${NODE_RANK:-0}
 export NNODES=${NNODES:-1}
-export NPROC_PER_NODE=${NPROC_PER_NODE:-8}
+export NPROC_PER_NODE=${NPROC_PER_NODE:-1}
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 export MASTER_PORT=${MASTER_PORT:-11451}
 
@@ -19,9 +19,9 @@ torchrun \
     --node_rank=$NODE_RANK \
     launch.py \
     --launch_mode test \
-    --resume_from_checkpoint ${OUTPUT_DIR}/latest/checkpoint-best \
+    --resume_from_checkpoint configs/cp3 \
+    --run_name 107_epoch \
+    --output_dir results/107_epoch \
     --config_path configs/vecformer.yaml \
     --model_args_path configs/model/vecformer.yaml \
-    --data_args_path configs/data/floorplancad.yaml \
-    --run_name vecformer \
-    --output_dir ${OUTPUT_DIR}/${TIMESTAMP}
+    --data_args_path configs/data/floorplancad_local.yaml \
