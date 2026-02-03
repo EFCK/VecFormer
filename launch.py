@@ -149,18 +149,21 @@ def main():
         else dataset_splits.val,
         data_collator=data_collator,
     )  # type: ignore
-    # -------------------- init wandb -------------------- #
-    init_wandb(training_args, model, dataset_splits)
+
+    
     # ----------------------- train ---------------------- #
     if training_args.launch_mode == "train":
+        init_wandb(training_args, model, dataset_splits)
         checkpoint = None
         if training_args.resume_from_checkpoint is not None:
             checkpoint = training_args.resume_from_checkpoint
             logger.info(f"Resuming from checkpoint: {checkpoint}")
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         trainer.log_metrics("train", train_result.metrics)
+        finish_wandb()
     # ------------------ resume train ------------------ #
     if training_args.launch_mode == "resume":
+        init_wandb(training_args, model, dataset_splits)
         if training_args.resume_from_checkpoint is None:
             raise ValueError("resume_from_checkpoint is required for resume mode")
         logger.info(f"Resuming from checkpoint: {training_args.resume_from_checkpoint}")
@@ -168,8 +171,10 @@ def main():
             resume_from_checkpoint=training_args.resume_from_checkpoint
         )
         trainer.log_metrics("train", train_result.metrics)
+        finish_wandb()
     # ------------------ continue train ------------------ #
     if training_args.launch_mode == "continue":
+        init_wandb(training_args, model, dataset_splits)
         if training_args.resume_from_checkpoint is None:
             raise ValueError("resume_from_checkpoint is required for continue mode")
         logger.info(
@@ -178,6 +183,7 @@ def main():
         trainer._load_from_checkpoint(training_args.resume_from_checkpoint)
         train_result = trainer.train()
         trainer.log_metrics("train", train_result.metrics)
+        finish_wandb()
     # ----------------------- test ----------------------- #
     if training_args.launch_mode == "test":
         if training_args.resume_from_checkpoint is None:
@@ -189,8 +195,7 @@ def main():
     # ---------------------------------------------------- #
     if training_args.launch_mode not in ["train", "resume", "continue", "test"]:
         raise ValueError(f"Invalid launch mode: {training_args.launch_mode}")
-    # ------------------- finish wandb ------------------- #
-    finish_wandb()
+    
 
 
 if __name__ == "__main__":
