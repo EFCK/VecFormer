@@ -10,8 +10,9 @@ report_to:
 # ------------------------- train ------------------------ #
 num_train_epochs: 100
 per_device_train_batch_size: 4
-per_device_eval_batch_size: 2
+per_device_eval_batch_size: 1
 optim: adamw_torch_fused
+bf16: false 
 learning_rate: 0.0001
 lr_scheduler_type: warmup_stable_decay
 warmup_ratio: 0.05
@@ -31,6 +32,8 @@ metric_for_best_model: PQ
 save_strategy: best
 
 # ------------------------- data ------------------------- #
-# For colab 2-4 workers is better. In local, use higher values (64).
-dataloader_num_workers: 4
+# changed by efck: reduced from 64 to 8 workers to avoid memory pressure and context switching overhead
+# 64 workers causes excessive memory usage and CPU overhead, 4-8 workers is optimal for most systems
+dataloader_num_workers: 8
+dataloader_pin_memory: true  # changed by efck: pin memory for faster CPU to GPU data transfer
 dataloader_drop_last: true # TODO!: if false, the eval step will have some strange bugs, wait to fix
