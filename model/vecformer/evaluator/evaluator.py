@@ -91,42 +91,113 @@ class Evaluator:
         log_prim_lens = [torch.log(1 + prim_len) for prim_len in targets["prim_lens"]]
         # Iterate over all batches
         for batch_idx in range(len(preds["pred_masks"])):
-            # Iterate over all ground truth instances
-            for target_idx in range(len(targets["target_masks"][batch_idx])):
-                target_mask = targets["target_masks"][batch_idx][target_idx]
-                target_label = targets["target_labels"][batch_idx][target_idx]
-                # Ignore the ground truth instance with ignore label
-                # In FloorPlanCAD dataset, the ignore label means the background
+            pred_masks = preds["pred_masks"][batch_idx]  # (num_preds, num_primitives)
+            pred_labels = preds["pred_labels"][batch_idx]  # (num_preds,)
+            target_masks = targets["target_masks"][batch_idx]  # (num_targets, num_primitives)
+            target_labels = targets["target_labels"][batch_idx]  # (num_targets,)
+            prim_lens = log_prim_lens[batch_idx]  # (num_primitives,)
+            
+            # changed by efck: vectorized IoU computation to avoid O(n^2) Python loop
+            # Skip if no predictions or targets
+            if pred_masks.shape[0] == 0 or target_masks.shape[0] == 0:
+                # Count all targets as false negatives
+                for target_idx in range(target_masks.shape[0]):
+                    target_label = target_labels[target_idx]
+                    if target_label != self.ignore_label:
+                        fn_per_class[target_label] += 1
+                continue
+            
+            # Filter out ignored labels
+            valid_pred_mask = pred_labels != self.ignore_label
+            valid_target_mask = target_labels != self.ignore_label
+            
+            if not valid_pred_mask.any() or not valid_target_mask.any():
+                # Count valid targets as false negatives
+                for target_idx in range(target_masks.shape[0]):
+                    target_label = target_labels[target_idx]
+                    if target_label != self.ignore_label:
+                        fn_per_class[target_label] += 1
+                continue
+            
+            # Compute IoU matrix in a vectorized manner: (num_targets, num_preds)
+            # changed by efck: compute full IoU matrix at once instead of per-pair
+            iou_matrix = self._calculate_iou_matrix(pred_masks, target_masks, prim_lens)
+            
+            # For each target, find predictions with IoU > threshold
+            for target_idx in range(target_masks.shape[0]):
+                target_label = target_labels[target_idx]
                 if target_label == self.ignore_label:
                     continue
-                # Iterate over all predictions to find the matching prediction for current ground truth instance
-                found_match = False
-                for pred_idx in range(len(preds["pred_masks"][batch_idx])):
-                    pred_mask = preds["pred_masks"][batch_idx][pred_idx]
-                    pred_label = preds["pred_labels"][batch_idx][pred_idx]
-                    # Ignore the predicted instance with ignore label
-                    # In FloorPlanCAD dataset, the ignore label means the background
-                    if pred_label == self.ignore_label:  # ignore the background
-                        continue
-                    # Calculate the IoU between the predicted instance and the ground truth instance
-                    iou = self._calculate_primitive_iou(
-                        pred_mask, target_mask, log_prim_lens[batch_idx]
-                    )
-                    if iou > self.iou_threshold:
-                        found_match = True
+                
+                # Get IoU scores for this target with all predictions
+                target_ious = iou_matrix[target_idx]  # (num_preds,)
+                
+                # Find predictions above threshold
+                above_threshold = target_ious > self.iou_threshold
+                
+                if not above_threshold.any():
+                    fn_per_class[target_label] += 1
+                else:
+                    # Check matching predictions
+                    matching_pred_indices = torch.where(above_threshold)[0]
+                    found_match = False
+                    for pred_idx in matching_pred_indices:
+                        pred_label = pred_labels[pred_idx]
+                        if pred_label == self.ignore_label:
+                            continue
+                        iou = target_ious[pred_idx]
                         if pred_label == target_label:
                             tp_per_class[pred_label] += 1
                             tp_iou_score_per_class[pred_label] += iou
+                            found_match = True
                         else:
                             fp_per_class[pred_label] += 1
-                if not found_match:
-                    fn_per_class[target_label] += 1
+                    if not found_match:
+                        fn_per_class[target_label] += 1
+                        
         return dict(
             tp_per_class=tp_per_class,
             fp_per_class=fp_per_class,
             fn_per_class=fn_per_class,
             tp_iou_score_per_class=tp_iou_score_per_class,
         )
+    
+    def _calculate_iou_matrix(self, pred_masks, target_masks, primitive_length):
+        """
+        changed by efck: Vectorized IoU matrix computation for all pred-target pairs at once.
+        This replaces the O(n^2) Python loop with batched tensor operations.
+        
+        Args:
+            pred_masks: (num_preds, num_primitives) boolean tensor
+            target_masks: (num_targets, num_primitives) boolean tensor  
+            primitive_length: (num_primitives,) float tensor
+            
+        Returns:
+            iou_matrix: (num_targets, num_preds) float tensor
+        """
+        # Convert to float for weighted computation
+        pred_masks_f = pred_masks.float()  # (num_preds, num_primitives)
+        target_masks_f = target_masks.float()  # (num_targets, num_primitives)
+        
+        # Weight by primitive length
+        weighted_pred = pred_masks_f * primitive_length.unsqueeze(0)  # (num_preds, num_primitives)
+        weighted_target = target_masks_f * primitive_length.unsqueeze(0)  # (num_targets, num_primitives)
+        
+        # Compute intersection: (num_targets, num_preds)
+        # For each target-pred pair, intersection = sum of lengths where both are 1
+        intersection = torch.mm(target_masks_f, (pred_masks_f * primitive_length.unsqueeze(0)).T)
+        
+        # Compute union: sum_target + sum_pred - intersection
+        sum_pred = weighted_pred.sum(dim=1)  # (num_preds,)
+        sum_target = weighted_target.sum(dim=1)  # (num_targets,)
+        
+        # Union = sum_target[:, None] + sum_pred[None, :] - intersection
+        union = sum_target.unsqueeze(1) + sum_pred.unsqueeze(0) - intersection
+        
+        # IoU
+        iou_matrix = intersection / (union + torch.finfo(union.dtype).eps)
+        
+        return iou_matrix
 
     def eval_semantic_quality(
         self, list_pred_sem_labels, list_target_sem_labels, list_primitive_lens
@@ -188,19 +259,37 @@ class Evaluator:
         for pred_sem_labels, target_sem_labels, primitive_lens in zip(
             list_pred_sem_labels, list_target_sem_labels, list_primitive_lens
         ):
-            for i in range(pred_sem_labels.shape[0]):
-                pred_sem_label = pred_sem_labels[i]
-                target_sem_label = target_sem_labels[i]
-                primitive_length = primitive_lens[i]
-
-                pred_per_class[pred_sem_label] += 1
-                gt_per_class[target_sem_label] += 1
-                w_pred_per_class[pred_sem_label] += primitive_length
-                w_gt_per_class[target_sem_label] += primitive_length
-
-                if pred_sem_label == target_sem_label:
-                    tp_per_class[pred_sem_label] += 1
-                    w_tp_per_class[pred_sem_label] += primitive_length
+            # changed by efck: vectorized computation using scatter_add instead of Python loop
+            # This replaces O(n) Python loop with O(1) GPU scatter operations
+            num_classes = self.num_classes + 1
+            
+            # Count predictions per class using bincount
+            pred_counts = torch.bincount(pred_sem_labels.long(), minlength=num_classes)
+            gt_counts = torch.bincount(target_sem_labels.long(), minlength=num_classes)
+            
+            # Weighted counts using scatter_add
+            w_pred_counts = torch.zeros(num_classes, dtype=torch.float32, device=pred_sem_labels.device)
+            w_gt_counts = torch.zeros(num_classes, dtype=torch.float32, device=pred_sem_labels.device)
+            w_pred_counts.scatter_add_(0, pred_sem_labels.long(), primitive_lens.float())
+            w_gt_counts.scatter_add_(0, target_sem_labels.long(), primitive_lens.float())
+            
+            # True positives: where prediction equals target
+            correct_mask = pred_sem_labels == target_sem_labels
+            correct_labels = pred_sem_labels[correct_mask]
+            correct_lengths = primitive_lens[correct_mask]
+            
+            tp_counts = torch.bincount(correct_labels.long(), minlength=num_classes)
+            w_tp_counts = torch.zeros(num_classes, dtype=torch.float32, device=pred_sem_labels.device)
+            if correct_labels.numel() > 0:
+                w_tp_counts.scatter_add_(0, correct_labels.long(), correct_lengths.float())
+            
+            # Accumulate
+            pred_per_class += pred_counts[:num_classes].to(torch.int32)
+            gt_per_class += gt_counts[:num_classes].to(torch.int32)
+            tp_per_class += tp_counts[:num_classes].to(torch.int32)
+            w_pred_per_class += w_pred_counts[:num_classes]
+            w_gt_per_class += w_gt_counts[:num_classes]
+            w_tp_per_class += w_tp_counts[:num_classes]
 
         return dict(
             tp_per_class=tp_per_class,
@@ -246,11 +335,15 @@ class Evaluator:
             }
             """
             output = {"pred_instances": []}
-            for idx in range(len(pred_masks)):
-                pred_label = pred_labels[idx].item()
-                pred_mask = pred_masks[idx]
-                # 获得pred_mask中1的值的索引
-                primitive_ids = pred_mask.nonzero(as_tuple=True)[0].cpu().tolist()
+            # changed by efck: batch the .item() calls and .cpu() conversion to reduce GPU sync points
+            # Previously each .item() caused a GPU sync, now we transfer all data at once
+            pred_labels_cpu = pred_labels.cpu().tolist()
+            pred_masks_cpu = pred_masks.cpu()
+            for idx in range(len(pred_masks_cpu)):
+                pred_label = pred_labels_cpu[idx]
+                pred_mask = pred_masks_cpu[idx]
+                # get indices where pred_mask is 1
+                primitive_ids = pred_mask.nonzero(as_tuple=True)[0].tolist()
                 output["pred_instances"].append(
                     {"primitive_ids": primitive_ids, "label": pred_label, "score": 1.0}
                 )
@@ -347,7 +440,6 @@ class MetricsComputer:
         precision = tp / (pred + eps)
         recall = tp / (gt + eps)
         f1 = 2 * precision * recall / (precision + recall + eps)
-        results["F1"] = f1.item()
 
         w_tp = self.f1_states["w_tp_per_class"].sum()
         w_pred = self.f1_states["w_pred_per_class"].sum()
@@ -355,10 +447,18 @@ class MetricsComputer:
         w_precision = w_tp / (w_pred + eps)
         w_recall = w_tp / (w_gt + eps)
         w_f1 = 2 * w_precision * w_recall / (w_precision + w_recall + eps)
-        results["wF1"] = w_f1.item()
+
+        # changed by efck: batch both .item() calls into single CPU transfer to minimize GPU sync points
+        f1_metrics = torch.stack([f1, w_f1]).cpu().tolist()
+        results["F1"] = f1_metrics[0]
+        results["wF1"] = f1_metrics[1]
 
         # calculate each class F1 and wF1
         if self.log_per_class_metrics:
+            # changed by efck: compute all per-class metrics on GPU first, then batch convert to Python
+            # This avoids multiple GPU sync points from individual .item() calls
+            f1_per_class = []
+            wf1_per_class = []
             for i in range(self.num_classes):
                 precision_i = self.f1_states["tp_per_class"][i] / (
                     self.f1_states["pred_per_class"][i] + eps
@@ -367,7 +467,7 @@ class MetricsComputer:
                     self.f1_states["gt_per_class"][i] + eps
                 )
                 f1_i = 2 * precision_i * recall_i / (precision_i + recall_i + eps)
-                results[f"class_{i + 1}_F1"] = f1_i.item()
+                f1_per_class.append(f1_i)
                 w_precision_i = self.f1_states["w_tp_per_class"][i] / (
                     self.f1_states["w_pred_per_class"][i] + eps
                 )
@@ -377,7 +477,15 @@ class MetricsComputer:
                 w_f1_i = (
                     2 * w_precision_i * w_recall_i / (w_precision_i + w_recall_i + eps)
                 )
-                results[f"class_{i + 1}_wF1"] = w_f1_i.item()
+                wf1_per_class.append(w_f1_i)
+            
+            # Batch convert all per-class metrics at once
+            f1_values = torch.stack(f1_per_class).cpu().tolist()
+            wf1_values = torch.stack(wf1_per_class).cpu().tolist()
+            for i in range(self.num_classes):
+                results[f"class_{i + 1}_F1"] = f1_values[i]
+                results[f"class_{i + 1}_wF1"] = wf1_values[i]
+            
             precision_bg = self.f1_states["tp_per_class"][-1] / (
                 self.f1_states["pred_per_class"][-1] + eps
             )
@@ -385,7 +493,6 @@ class MetricsComputer:
                 self.f1_states["gt_per_class"][-1] + eps
             )
             f1_bg = 2 * precision_bg * recall_bg / (precision_bg + recall_bg + eps)
-            results["class_bg_F1"] = f1_bg.item()
             w_precision_bg = self.f1_states["w_tp_per_class"][-1] / (
                 self.f1_states["w_pred_per_class"][-1] + eps
             )
@@ -395,7 +502,10 @@ class MetricsComputer:
             w_f1_bg = (
                 2 * w_precision_bg * w_recall_bg / (w_precision_bg + w_recall_bg + eps)
             )
-            results["class_bg_wF1"] = w_f1_bg.item()
+            # changed by efck: batch convert background metrics to reduce GPU sync points
+            bg_metrics = torch.stack([f1_bg, w_f1_bg]).cpu().tolist()
+            results["class_bg_F1"] = bg_metrics[0]
+            results["class_bg_wF1"] = bg_metrics[1]
 
         self.f1_states.clear()
         return results
@@ -490,9 +600,11 @@ class MetricsComputer:
 
         class_metrics = {}
         if self.log_per_class_metrics:
+            # changed by efck: batch convert all per-class PQ metrics at once to reduce GPU sync points
+            pq_values = (pq_per_class * 100).cpu().tolist()
             class_metrics = {
-                f"class_{id + 1}_PQ": pq.item() * 100
-                for id, pq in enumerate(pq_per_class)
+                f"class_{id + 1}_PQ": pq_values[id]
+                for id in range(len(pq_per_class))
             }
 
         thing_pq, thing_sq, thing_rq = cal_scores(
@@ -518,16 +630,21 @@ class MetricsComputer:
 
         self.metric_states.clear()
 
+        # changed by efck: batch all .item() calls together to minimize GPU sync points
+        # Compute all metrics on GPU, then transfer to CPU once
+        all_metrics = torch.stack([pq, sq, rq, thing_pq, thing_sq, thing_rq, stuff_pq, stuff_sq, stuff_rq])
+        all_metrics_cpu = (all_metrics * 100).cpu().tolist()
+        
         metrics = {
-            "PQ": pq.item() * 100,
-            "SQ": sq.item() * 100,
-            "RQ": rq.item() * 100,
-            "thing_PQ": thing_pq.item() * 100,
-            "thing_SQ": thing_sq.item() * 100,
-            "thing_RQ": thing_rq.item() * 100,
-            "stuff_PQ": stuff_pq.item() * 100,
-            "stuff_SQ": stuff_sq.item() * 100,
-            "stuff_RQ": stuff_rq.item() * 100,
+            "PQ": all_metrics_cpu[0],
+            "SQ": all_metrics_cpu[1],
+            "RQ": all_metrics_cpu[2],
+            "thing_PQ": all_metrics_cpu[3],
+            "thing_SQ": all_metrics_cpu[4],
+            "thing_RQ": all_metrics_cpu[5],
+            "stuff_PQ": all_metrics_cpu[6],
+            "stuff_SQ": all_metrics_cpu[7],
+            "stuff_RQ": all_metrics_cpu[8],
         }
         metrics.update(class_metrics)
 
