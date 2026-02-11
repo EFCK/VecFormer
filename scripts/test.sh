@@ -19,9 +19,9 @@ torchrun \
     --node_rank=$NODE_RANK \
     launch.py \
     --launch_mode test \
-    --resume_from_checkpoint configs/cp3 \
-    --run_name 107_epoch \
-    --output_dir results/107_epoch \
+    --resume_from_checkpoint configs/cp_98 \
+    --run_name 98_epoch \
+    --output_dir results/98_epoch \
     --config_path configs/vecformer.yaml \
     --model_args_path configs/model/vecformer.yaml \
     --data_args_path configs/data/floorplancad_local.yaml \

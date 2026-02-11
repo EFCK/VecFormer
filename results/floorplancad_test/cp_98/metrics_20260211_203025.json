@@ -1,0 +1,29 @@
+{
+  "metrics": {
+    "PQ": 90.11130332946777,
+    "SQ": 91.8465793132782,
+    "RQ": 98.11068177223206,
+    "thing_PQ": 90.14249444007874,
+    "thing_SQ": 92.81867742538452,
+    "thing_RQ": 97.11676239967346,
+    "stuff_PQ": 90.0673508644104,
+    "stuff_SQ": 90.50967693328857,
+    "stuff_RQ": 99.5112955570221,
+    "F1": 0.8969572186470032,
+    "wF1": 0.9103547930717468
+  },
+  "timing": {
+    "total_time": 742.7676999630676,
+    "avg_time_per_sample": 0.19408615102248958,
+    "num_samples": 3827,
+    "primitives_min": 18,
+    "primitives_max": 27993,
+    "primitives_mean": 1032.2,
+    "min_time_per_sample": 0.05760629100041115,
+    "max_time_per_sample": 4.0294097219994,
+    "peak_vram_reserved_mb": 18762.0,
+    "peak_vram_allocated_mb": 18481.4,
+    "peak_vram_physical_mb": 16136.6
+  },
+  "skipped_files": []
+}

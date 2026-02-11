@@ -71,3 +71,9 @@ instance_preds/
 /configs/cp3
 /configs/cp_98
 /configs/cp_106
+
+# Results directory: track logs and metrics, ignore heavy outputs
+results/**/*.npy
+results/**/*.svg
+!results/**/*.log
+!results/**/*.json

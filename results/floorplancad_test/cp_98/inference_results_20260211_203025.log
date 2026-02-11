@@ -1,0 +1,40 @@
+============================================================
+VECFORMER INFERENCE RESULTS
+============================================================
+
+Timestamp: 20260211_203025
+Checkpoint: configs/cp_98
+Dataset: datasets/FloorPlanCAD-jsons/test
+Device: cuda
+FP16: False
+
+------------------------------------------------------------
+TIMING
+------------------------------------------------------------
+Total samples: 3827
+Total inference time: 742.77s
+Average time per sample: 0.1941s
+Primitives (min/max/mean): 18 / 27993 / 1032.2
+Min time per sample: 0.0576s
+Max time per sample: 4.0294s
+Peak VRAM physical: 16136.6MB
+Peak VRAM allocated: 18481.4MB
+Peak VRAM reserved: 18762.0MB
+
+------------------------------------------------------------
+METRICS
+------------------------------------------------------------
+
+Panoptic Segmentation:
+  PQ: 90.111  |  SQ: 91.847  |  RQ: 98.111
+
+Thing classes:
+  PQ: 90.142  |  SQ: 92.819  |  RQ: 97.117
+
+Stuff classes:
+  PQ: 90.067  |  SQ: 90.510  |  RQ: 99.511
+
+Semantic Segmentation:
+  F1:  0.8970
+  wF1: 0.9104
+
