@@ -81,6 +81,12 @@ class VecFormerOutput(ModelOutput):
 
             \\- `list_pred_labels` (`List[torch.Tensor]`, each tensor shape is (num_predicted_instances,)): Predicted labels
 
+        `raw_sem_logits` (`List[torch.Tensor]`): Raw semantic logits before argmax, each tensor shape is
+            (num_primitives, num_semantic_classes + 1). Only returned when `is_inference_mode` is `True`.
+
+        `targets` (`Dict`): Ground truth targets for visualization/evaluation, contains target_masks,
+            target_labels, prim_lens, sem_labels. Only returned when `is_inference_mode` is `True`.
+
         `data_paths` (`List[str]`): List of data paths, each path is the path of the data in the batch
     """
     loss: Optional[torch.Tensor] = None
@@ -90,6 +96,8 @@ class VecFormerOutput(ModelOutput):
     dict_pred_sem_segs: Optional[Dict[str, List[torch.Tensor]]] = None
     dict_pred_inst_segs: Optional[Dict[str, List[torch.Tensor]]] = None
     dict_pred_panop_segs: Optional[Dict[str, List[torch.Tensor]]] = None
+    raw_sem_logits: Optional[List[torch.Tensor]] = None
+    targets: Optional[Dict] = None
     data_paths: Optional[List[str]] = None
 
 class VecFormer(PreTrainedModel):
@@ -648,6 +656,8 @@ class VecFormer(PreTrainedModel):
 
         # ------------- get vecformer output ------------- #
         loss, dict_sublosses, metric_states, f1_states = None, None, None, None
+        raw_sem_logits = None
+        output_targets = None
         # ---------------- calculate loss ---------------- #
         if targets is not None and self.training:
             # calculate panoptic symbol spotting loss
@@ -656,6 +666,8 @@ class VecFormer(PreTrainedModel):
         if targets is not None and not self.training:
             # get the last layer's outputs
             last_outputs = outputs[-1]
+            # save raw semantic logits before argmax (for visualization compatibility)
+            raw_sem_logits = last_outputs["list_pred_sem_labels"]
             dict_pred_sem_segs, dict_pred_inst_segs, dict_pred_panop_segs = self.predict(
                 last_outputs["list_pred_sem_labels"],
                 last_outputs["list_pred_inst_masks"],
@@ -667,12 +679,13 @@ class VecFormer(PreTrainedModel):
                 pred_masks=dict_pred_panop_segs["list_pred_masks"],
                 pred_labels=dict_pred_panop_segs["list_pred_labels"],
                 pred_sem_segs=dict_pred_sem_segs["list_pred_labels"])
-            targets = dict(
+            # save targets before overwriting for output
+            output_targets = dict(
                 target_masks=targets["list_target_panop_masks"],
                 target_labels=targets["list_target_panop_labels"],
                 prim_lens=targets["list_target_prim_lens"],
                 sem_labels=targets["list_target_sem_labels"])
-            metric_states, f1_states = self.evaluator(preds, targets)
+            metric_states, f1_states = self.evaluator(preds, output_targets)
             if self.config.whether_output_instance:
                 self.evaluator.eval_instance_quality(preds, data_paths)
         return VecFormerOutput(loss=loss if loss is not None else torch.tensor(0.0, device=feats.device),
@@ -684,6 +697,10 @@ class VecFormer(PreTrainedModel):
                                dict_pred_inst_segs=dict_pred_inst_segs # type: ignore
                                if self.is_inference_mode else None,
                                dict_pred_panop_segs=dict_pred_panop_segs # type: ignore
+                               if self.is_inference_mode else None,
+                               raw_sem_logits=raw_sem_logits
+                               if self.is_inference_mode else None,
+                               targets=output_targets
                                if self.is_inference_mode else None,
                                data_paths=data_paths
                                if self.is_inference_mode else None)
