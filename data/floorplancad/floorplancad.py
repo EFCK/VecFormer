@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import torch
 from torch.utils.data import Dataset
@@ -21,14 +21,17 @@ from .transform_utils import (
 
 class FloorPlanCAD(Dataset):
 
-    def __init__(self, root_dir: str, split: str,
-                 train_transform_args: Dict[str, Any],
-                 eval_transform_args: Dict[str, Any]):
+    def __init__(self, root_dir: str, split: Optional[str] = None,
+                 train_transform_args: Optional[Dict[str, Any]] = None,
+                 eval_transform_args: Optional[Dict[str, Any]] = None):
         self.root_dir = root_dir
         self.split = split
-        self.train_transform_args = train_transform_args
-        self.eval_transform_args = eval_transform_args
-        self.data_dir = os.path.join(root_dir, split)
+        self.train_transform_args = train_transform_args or {}
+        self.eval_transform_args = eval_transform_args or {}
+        if split:
+            self.data_dir = os.path.join(root_dir, split)
+        else:
+            self.data_dir = root_dir
         self.data_paths = scan_dir(self.data_dir, suffix=".json")
 
     def __len__(self):
@@ -50,7 +53,7 @@ class FloorPlanCAD(Dataset):
     def _get_transform_args(self) -> Dict[str, Any]:
         if self.split == "train":
             return self.train_transform_args
-        elif self.split == "val" or self.split == "test":
+        elif self.split in ("val", "test", None):
             return self.eval_transform_args
         else:
             raise ValueError(f"Invalid split: {self.split}")
