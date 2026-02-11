@@ -70,7 +70,10 @@ class SparseMatcher:
             ids = torch.argwhere(costs < values)
             if ids.numel() == 0:
                 # if no match, use hungarian algorithm to find the best match
-                query_ids, object_ids = linear_sum_assignment(costs_cloned.cpu().numpy())
+                # changed by efck: added detach() to avoid unnecessary gradient tracking during cpu transfer
+                # Hungarian matching happens in the cpu therefore no gradient will flow from this part.
+                costs_cpu = costs_cloned.detach().cpu().numpy()
+                query_ids, object_ids = linear_sum_assignment(costs_cpu)
                 query_ids = torch.from_numpy(query_ids).to(query_labels.device)
                 object_ids = torch.from_numpy(object_ids).to(query_labels.device)
                 list_match_indices.append(torch.stack([query_ids, object_ids]))
