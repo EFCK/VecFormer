@@ -1,0 +1,47 @@
+============================================================
+VECFORMER INFERENCE RESULTS
+============================================================
+
+Timestamp: 20260212_084624
+Checkpoint: configs/cp_98
+Dataset: datasets/manual_split_full-sampled-as-line-jsons
+Device: cuda
+FP16: False
+Ignore mode: poilabs ([35, 3, 5, 7, 8, 9, 11, 14, 15, 17, 19, 20, 21, 22, 23])
+Ground truth: available
+
+------------------------------------------------------------
+TIMING
+------------------------------------------------------------
+Total samples: 192
+Total inference time: 49.28s
+Average time per sample: 0.2567s
+Primitives (min/mean/max/std): 46 / 4307.2 / 34607 / 6326.1
+Min time per sample: 0.0588s
+Max time per sample: 2.4077s
+Std time per sample: 0.2940s
+VRAM allocated (min/mean/max/std): 221.5 / 1477.4 / 20246.3 / 3113.4 MB
+VRAM reserved  (min/mean/max/std): 232.0 / 1546.0 / 20468.0 / 3195.7 MB
+VRAM physical  (min/mean/max/std): 1181.8 / 3763.3 / 15960.2 / 2723.7 MB
+
+------------------------------------------------------------
+METRICS
+------------------------------------------------------------
+
+Panoptic Segmentation:
+  PQ: 68.142  |  SQ: 79.167  |  RQ: 86.074
+
+Thing classes:
+  PQ: 70.809  |  SQ: 81.990  |  RQ: 86.363
+
+Stuff classes:
+  PQ: 61.666  |  SQ: 72.231  |  RQ: 85.373
+
+Semantic Segmentation:
+  F1:  0.1712
+  wF1: 0.3449
+
+------------------------------------------------------------
+SKIPPED FILES (OOM)
+------------------------------------------------------------
+  datasets/manual_split_full-sampled-as-line-jsons/UNILEVER_44_14X14_layered.json

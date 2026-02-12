@@ -1,0 +1,36 @@
+============================================================
+VECFORMER INFERENCE RESULTS
+============================================================
+
+Timestamp: 20260212_085550
+Checkpoint: configs/cp_98
+Dataset: datasets/ARI3-sampled-as-line-jsons
+Device: cuda
+FP16: False
+Ignore mode: poilabs ([35, 3, 5, 7, 8, 9, 11, 14, 15, 17, 19, 20, 21, 22, 23])
+Ground truth: not available — metrics not computed
+
+------------------------------------------------------------
+TIMING
+------------------------------------------------------------
+Total samples: 182
+Total inference time: 15.25s
+Average time per sample: 0.0838s
+Primitives (min/mean/max/std): 9 / 1695.4 / 39625 / 3734.8
+Min time per sample: 0.0592s
+Max time per sample: 1.1146s
+Std time per sample: 0.0870s
+VRAM allocated (min/mean/max/std): 220.5 / 427.8 / 6184.7 / 778.5 MB
+VRAM reserved  (min/mean/max/std): 232.0 / 458.6 / 6486.0 / 816.1 MB
+VRAM physical  (min/mean/max/std): 1393.6 / 1949.7 / 8027.9 / 843.0 MB
+
+------------------------------------------------------------
+METRICS
+------------------------------------------------------------
+
+No evaluation metrics — ground truth labels not available.
+
+------------------------------------------------------------
+SKIPPED FILES (OOM)
+------------------------------------------------------------
+  datasets/ARI3-sampled-as-line-jsons/ARI 3_1Bodrum_47.Parça.json

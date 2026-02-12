@@ -1,0 +1,61 @@
+{
+  "metrics": {
+    "PQ": 68.14200282096863,
+    "SQ": 79.16670441627502,
+    "RQ": 86.07406616210938,
+    "thing_PQ": 70.80890536308289,
+    "thing_SQ": 81.99023008346558,
+    "thing_RQ": 86.36261224746704,
+    "stuff_PQ": 61.666131019592285,
+    "stuff_SQ": 72.23107814788818,
+    "stuff_RQ": 85.37340760231018,
+    "F1": 0.1712215393781662,
+    "wF1": 0.3449438512325287
+  },
+  "timing": {
+    "total_time": 49.27760810000564,
+    "avg_time_per_sample": 0.25665420885419604,
+    "num_samples": 192,
+    "primitives_min": 46,
+    "primitives_mean": 4307.2,
+    "primitives_max": 34607,
+    "primitives_std": 6326.1,
+    "min_time_per_sample": 0.05882268699951965,
+    "max_time_per_sample": 2.4077404359995853,
+    "std_time_per_sample": 0.2939758026397932,
+    "vram_allocated_min_mb": 221.5,
+    "vram_allocated_mean_mb": 1477.4,
+    "vram_allocated_max_mb": 20246.3,
+    "vram_allocated_std_mb": 3113.4,
+    "vram_reserved_min_mb": 232.0,
+    "vram_reserved_mean_mb": 1546.0,
+    "vram_reserved_max_mb": 20468.0,
+    "vram_reserved_std_mb": 3195.7,
+    "vram_physical_min_mb": 1181.8,
+    "vram_physical_mean_mb": 3763.3,
+    "vram_physical_max_mb": 15960.2,
+    "vram_physical_std_mb": 2723.7
+  },
+  "skipped_files": [
+    "datasets/manual_split_full-sampled-as-line-jsons/UNILEVER_44_14X14_layered.json"
+  ],
+  "has_ground_truth": true,
+  "ignore_mode": "poilabs",
+  "ignore_label": [
+    35,
+    3,
+    5,
+    7,
+    8,
+    9,
+    11,
+    14,
+    15,
+    17,
+    19,
+    20,
+    21,
+    22,
+    23
+  ]
+}

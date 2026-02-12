@@ -1,0 +1,40 @@
+{
+  "metrics": {
+    "PQ": 90.1049256324768,
+    "SQ": 91.84219241142273,
+    "RQ": 98.10842275619507,
+    "thing_PQ": 90.1513934135437,
+    "thing_SQ": 92.83666014671326,
+    "thing_RQ": 97.10753560066223,
+    "stuff_PQ": 90.0393545627594,
+    "stuff_SQ": 90.47319889068604,
+    "stuff_RQ": 99.5204746723175,
+    "F1": 0.8970602750778198,
+    "wF1": 0.9108233451843262
+  },
+  "timing": {
+    "total_time": 741.0285295929903,
+    "avg_time_per_sample": 0.1936317035779959,
+    "num_samples": 3827,
+    "primitives_min": 18,
+    "primitives_mean": 1032.2,
+    "primitives_max": 27993,
+    "primitives_std": 1621.6,
+    "min_time_per_sample": 0.05621282899983271,
+    "max_time_per_sample": 3.4696342229999573,
+    "std_time_per_sample": 0.12255045946843098,
+    "vram_allocated_min_mb": 221.2,
+    "vram_allocated_mean_mb": 320.7,
+    "vram_allocated_max_mb": 18481.5,
+    "vram_allocated_std_mb": 540.9,
+    "vram_reserved_min_mb": 230.0,
+    "vram_reserved_mean_mb": 347.9,
+    "vram_reserved_max_mb": 18762.0,
+    "vram_reserved_std_mb": 564.0,
+    "vram_physical_min_mb": 1430.3,
+    "vram_physical_mean_mb": 1982.2,
+    "vram_physical_max_mb": 16211.7,
+    "vram_physical_std_mb": 528.6
+  },
+  "skipped_files": []
+}
