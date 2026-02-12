@@ -324,7 +324,9 @@ def run_inference(
         import pynvml
         pynvml.nvmlInit()
         nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-        peak_physical_vram = 0
+        per_sample_allocated = []  # per-sample peak allocated VRAM in bytes
+        per_sample_reserved = []   # per-sample peak reserved VRAM in bytes
+        per_sample_physical = []   # per-sample physical VRAM snapshot in bytes
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm.tqdm(dataloader, desc="Inference")):
@@ -345,6 +347,7 @@ def run_inference(
                 # Run inference
                 with torch.amp.autocast("cuda", enabled=fp16):
                     if profile:
+                        torch.cuda.reset_peak_memory_stats()
                         torch.cuda.synchronize()
                     t1 = time.monotonic()
                     outputs = model(**batch_device)
@@ -353,10 +356,12 @@ def run_inference(
                     t2 = time.monotonic()
                     inference_times.append(t2 - t1)
 
-                    # Track peak physical VRAM via driver
+                    # Track VRAM usage
                     if profile:
+                        per_sample_allocated.append(torch.cuda.max_memory_allocated())
+                        per_sample_reserved.append(torch.cuda.max_memory_reserved())
                         mem_info = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle)
-                        peak_physical_vram = max(peak_physical_vram, mem_info.used)
+                        per_sample_physical.append(mem_info.used)
 
                 # Accumulate metric states
                 if outputs.metric_states is not None:
@@ -418,24 +423,35 @@ def run_inference(
         "avg_time_per_sample": avg_time,
         "num_samples": len(inference_times),
         "primitives_min": int(np.min(primitive_counts)) if primitive_counts else 0,
-        "primitives_max": int(np.max(primitive_counts)) if primitive_counts else 0,
         "primitives_mean": round(float(np.mean(primitive_counts)), 1) if primitive_counts else 0,
+        "primitives_max": int(np.max(primitive_counts)) if primitive_counts else 0,
+        "primitives_std": round(float(np.std(primitive_counts)), 1) if primitive_counts else 0,
     }
 
     if profile and inference_times:
         min_time = float(np.min(inference_times))
         max_time = float(np.max(inference_times))
-        peak_reserved_mb = torch.cuda.max_memory_reserved() / (1024 ** 2)
-        peak_allocated_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
-        peak_physical_vram_mb = peak_physical_vram / (1024 ** 2)
+        allocated_mb = np.array(per_sample_allocated) / (1024 ** 2)
+        reserved_mb = np.array(per_sample_reserved) / (1024 ** 2)
+        physical_mb = np.array(per_sample_physical) / (1024 ** 2)
         pynvml.nvmlShutdown()
 
         # Add profile stats to timing dict
         timing["min_time_per_sample"] = min_time
         timing["max_time_per_sample"] = max_time
-        timing["peak_vram_reserved_mb"] = round(peak_reserved_mb, 1)
-        timing["peak_vram_allocated_mb"] = round(peak_allocated_mb, 1)
-        timing["peak_vram_physical_mb"] = round(peak_physical_vram_mb, 1)
+        timing["std_time_per_sample"] = float(np.std(inference_times))
+        timing["vram_allocated_min_mb"] = round(float(np.min(allocated_mb)), 1)
+        timing["vram_allocated_mean_mb"] = round(float(np.mean(allocated_mb)), 1)
+        timing["vram_allocated_max_mb"] = round(float(np.max(allocated_mb)), 1)
+        timing["vram_allocated_std_mb"] = round(float(np.std(allocated_mb)), 1)
+        timing["vram_reserved_min_mb"] = round(float(np.min(reserved_mb)), 1)
+        timing["vram_reserved_mean_mb"] = round(float(np.mean(reserved_mb)), 1)
+        timing["vram_reserved_max_mb"] = round(float(np.max(reserved_mb)), 1)
+        timing["vram_reserved_std_mb"] = round(float(np.std(reserved_mb)), 1)
+        timing["vram_physical_min_mb"] = round(float(np.min(physical_mb)), 1)
+        timing["vram_physical_mean_mb"] = round(float(np.mean(physical_mb)), 1)
+        timing["vram_physical_max_mb"] = round(float(np.max(physical_mb)), 1)
+        timing["vram_physical_std_mb"] = round(float(np.std(physical_mb)), 1)
 
         # Console output
         logger.info("=" * 60)
@@ -445,10 +461,11 @@ def run_inference(
         logger.info(f"  Mean time           : {avg_time:.4f}s")
         logger.info(f"  Min time            : {min_time:.4f}s")
         logger.info(f"  Max time            : {max_time:.4f}s")
-        logger.info(f"  Peak VRAM physical  : {peak_physical_vram_mb:.1f}MB")
-        logger.info(f"  Peak VRAM allocated : {peak_allocated_mb:.1f}MB")
-        logger.info(f"  Peak VRAM reserved  : {peak_reserved_mb:.1f}MB")
-        logger.info(f"  Primitives (min/max/mean): {timing['primitives_min']} / {timing['primitives_max']} / {timing['primitives_mean']}")
+        logger.info(f"  Std time            : {float(np.std(inference_times)):.4f}s")
+        logger.info(f"  VRAM allocated (min/mean/max/std): {np.min(allocated_mb):.1f} / {np.mean(allocated_mb):.1f} / {np.max(allocated_mb):.1f} / {np.std(allocated_mb):.1f} MB")
+        logger.info(f"  VRAM reserved  (min/mean/max/std): {np.min(reserved_mb):.1f} / {np.mean(reserved_mb):.1f} / {np.max(reserved_mb):.1f} / {np.std(reserved_mb):.1f} MB")
+        logger.info(f"  VRAM physical  (min/mean/max/std): {np.min(physical_mb):.1f} / {np.mean(physical_mb):.1f} / {np.max(physical_mb):.1f} / {np.std(physical_mb):.1f} MB")
+        logger.info(f"  Primitives (min/mean/max/std): {timing['primitives_min']} / {timing['primitives_mean']} / {timing['primitives_max']} / {timing['primitives_std']}")
 
     return {
         "metrics": metrics,
@@ -483,13 +500,14 @@ def save_results(results: Dict, output_dir: str, args):
         f.write(f"Total samples: {timing['num_samples']}\n")
         f.write(f"Total inference time: {timing['total_time']:.2f}s\n")
         f.write(f"Average time per sample: {timing['avg_time_per_sample']:.4f}s\n")
-        f.write(f"Primitives (min/max/mean): {timing['primitives_min']} / {timing['primitives_max']} / {timing['primitives_mean']}\n")
+        f.write(f"Primitives (min/mean/max/std): {timing['primitives_min']} / {timing['primitives_mean']} / {timing['primitives_max']} / {timing['primitives_std']}\n")
         if "min_time_per_sample" in timing:
             f.write(f"Min time per sample: {timing['min_time_per_sample']:.4f}s\n")
             f.write(f"Max time per sample: {timing['max_time_per_sample']:.4f}s\n")
-            f.write(f"Peak VRAM physical: {timing['peak_vram_physical_mb']:.1f}MB\n")
-            f.write(f"Peak VRAM allocated: {timing['peak_vram_allocated_mb']:.1f}MB\n")
-            f.write(f"Peak VRAM reserved: {timing['peak_vram_reserved_mb']:.1f}MB\n")
+            f.write(f"Std time per sample: {timing['std_time_per_sample']:.4f}s\n")
+            f.write(f"VRAM allocated (min/mean/max/std): {timing['vram_allocated_min_mb']:.1f} / {timing['vram_allocated_mean_mb']:.1f} / {timing['vram_allocated_max_mb']:.1f} / {timing['vram_allocated_std_mb']:.1f} MB\n")
+            f.write(f"VRAM reserved  (min/mean/max/std): {timing['vram_reserved_min_mb']:.1f} / {timing['vram_reserved_mean_mb']:.1f} / {timing['vram_reserved_max_mb']:.1f} / {timing['vram_reserved_std_mb']:.1f} MB\n")
+            f.write(f"VRAM physical  (min/mean/max/std): {timing['vram_physical_min_mb']:.1f} / {timing['vram_physical_mean_mb']:.1f} / {timing['vram_physical_max_mb']:.1f} / {timing['vram_physical_std_mb']:.1f} MB\n")
         f.write("\n")
 
         f.write("-" * 60 + "\n")
