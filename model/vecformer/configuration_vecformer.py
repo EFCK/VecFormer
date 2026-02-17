@@ -1,5 +1,9 @@
 """
 VecFormer configuration
+
+# made by EFCK - Custom data adaptation (ported from SymPointV2):
+#   1. evaluator_config["ignore_label"]: changed from int to list[int] (e.g. [35])
+#   2. metrics_computer_config["ignore_label"]: propagated from evaluator_config
 """
 
 from transformers import PretrainedConfig
@@ -145,10 +149,11 @@ class VecFormerConfig(PretrainedConfig):
         self.whether_output_instance = whether_output_instance
         # Evaluator
         evaluator_config["num_classes"] = num_semantic_classes
-        evaluator_config["ignore_label"] = num_semantic_classes
+        evaluator_config["ignore_label"] = [num_semantic_classes]  # list of class indices to ignore
         self.evaluator_config: dict = evaluator_config
         # MetricsComputer
         metrics_computer_config["num_classes"] = num_semantic_classes
         metrics_computer_config["thing_class_idxs"] = thing_class_idxs
         metrics_computer_config["stuff_class_idxs"] = stuff_class_idxs
+        metrics_computer_config["ignore_label"] = evaluator_config["ignore_label"]
         self.metrics_computer_config: dict = metrics_computer_config

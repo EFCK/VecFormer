@@ -1,6 +1,14 @@
+# made by EFCK - Custom data adaptation (ported from SymPointV2):
+#   1. parse_color_to_rgb(): Robust color parsing (rgb(), hex, named colors, numeric fallback)
+#   2. parse_primitive(): Skip zero-length/degenerate paths (prim_length < 1e-10)
+#   3. parse_svg(): Fallback for SVGs without <g> group tags (iterate root children directly)
+#   4. validate_labels(): Log invalid semantic/instance ID combinations
+#   5. main(): Write invalid_labels.log with per-file label validation results
+
 import os
 import json
 import math
+import re
 import argparse
 import xml.etree.cElementTree as ET
 from typing import Optional
@@ -12,6 +20,55 @@ from utils.parallel_mapper import parallel_map
 from utils.svg_util import (scan_dir, get_namespace, add_ns, del_ns,
                             primitive2str, get_t_values)
 from data.floorplancad.dataclass_define import ProcessArgs, SVGData
+
+
+def parse_color_to_rgb(color_str: str) -> list[int]:
+    """
+    Convert various color formats to RGB list.
+    Handles: rgb(r,g,b), named colors (black, white, red, etc.), hex colors (#RRGGBB/#RGB).
+    Falls back to [0, 0, 0] (black) if parsing fails.
+    """
+    if not color_str:
+        return [0, 0, 0]
+
+    # rgb(r,g,b) format
+    if color_str.startswith('rgb'):
+        rgb_values = re.findall(r'\d+', color_str)
+        if len(rgb_values) >= 3:
+            return list(map(int, rgb_values[:3]))
+
+    # Hex color format
+    if color_str.startswith('#'):
+        hex_str = color_str.lstrip('#')
+        if len(hex_str) == 3:
+            return [int(c*2, 16) for c in hex_str]
+        elif len(hex_str) == 6:
+            return [int(hex_str[i:i+2], 16) for i in (0, 2, 4)]
+
+    # Named color mapping
+    color_map = {
+        'black': [0, 0, 0],
+        'white': [255, 255, 255],
+        'red': [255, 0, 0],
+        'green': [0, 128, 0],
+        'blue': [0, 0, 255],
+        'yellow': [255, 255, 0],
+        'cyan': [0, 255, 255],
+        'magenta': [255, 0, 255],
+        'gray': [128, 128, 128],
+        'grey': [128, 128, 128],
+        'none': [0, 0, 0],
+    }
+    if color_str.lower() in color_map:
+        return color_map[color_str.lower()]
+
+    # Try to extract any numbers as fallback
+    rgb_values = re.findall(r'\d+', color_str)
+    if len(rgb_values) >= 3:
+        return list(map(int, rgb_values[:3]))
+
+    # Default to black if parsing fails
+    return [0, 0, 0]
 
 
 def clip_line_to_bbox(line_args: list[float],
@@ -160,8 +217,7 @@ def parse_primitive(
     # get primitive width
     prim_width = float(primitive.attrib.get("stroke-width", 0.1))
     # get primitive color
-    prim_color = primitive.attrib.get("stroke", "rgb(0,0,0)")
-    prim_color = list(map(int, prim_color.strip("rgb(").strip(")").split(",")))
+    prim_color = parse_color_to_rgb(primitive.attrib.get("stroke", "rgb(0,0,0)"))
     # parse primitive to svg object
     path: Optional[Path] = None
     is_origin_line = False  # Flag to check if the primitive is originally a line segment
@@ -183,6 +239,9 @@ def parse_primitive(
     if type(prim_length) != float:
         prim_length = 0.0
         raise ValueError("Primitive length is not a float")
+    # Skip zero-length / degenerate primitives
+    if prim_length < 1e-10:
+        return [], prim_width, prim_color, prim_length
     # Sample primitives
     sampled_coords = sample_primitive(path, is_origin_line, line_t_values,
                                       curve_t_values, max_length, bbox,
@@ -223,41 +282,79 @@ def parse_svg(input_file_path: str, line_t_values: list[float],
 
     layer_id = 0
     primitive_id = 0
-    for group in root.iter(add_ns("g", namespace)):
-        # Skip empty layer
-        if len(group) == 0:
-            continue
-        for primitive in group:
-            # ------------- sample primitives ------------ #
-            sampled_coords, prim_width, prim_color, prim_length = parse_primitive(
-                primitive, line_t_values, curve_t_values, max_length, bbox, connect_lines)
-            if len(sampled_coords) == 0:
+
+    def _process_primitive(primitive, layer_id, primitive_id, svg_data):
+        """Process a single SVG primitive element, appending data to svg_data.
+        Returns updated primitive_id, or the same value if primitive was skipped."""
+        # ------------- sample primitives ------------ #
+        sampled_coords, prim_width, prim_color, prim_length = parse_primitive(
+            primitive, line_t_values, curve_t_values, max_length, bbox, connect_lines)
+        if len(sampled_coords) == 0:
+            return primitive_id
+        # ------------------ get ids ----------------- #
+        # In FloorPlanCAD dataset, semanticId starts from 1 to 35, and instanceId starts from 1,
+        # instanceId=-1 means uncountable semantic.
+        # we define semanticId=36 for background and instanceId=-1 for background/uncountable
+        semantic_id = int(primitive.attrib.get("semanticId", 36))
+        if semantic_id == 36: # background semantic
+            instance_id = -1
+        else: # valid semantic
+            instance_id = int(primitive.attrib.get("instanceId", -1))
+        semantic_id -= 1  # shift id from [1, 36] to [0, 35] for better compatibility
+        # ---------------- append data --------------- #
+        for coord in sampled_coords:
+            svg_data.coords.append(coord)
+            svg_data.colors.append(prim_color)
+            svg_data.widths.append(prim_width)
+            svg_data.primitive_ids.append(primitive_id)
+            svg_data.layer_ids.append(layer_id)
+        svg_data.semantic_ids.append(semantic_id)
+        svg_data.instance_ids.append(instance_id)
+        svg_data.primitive_lengths.append(prim_length)
+        # -------------------------------------------- #
+        return primitive_id + 1
+
+    # Check if SVG has <g> group tags
+    groups = list(root.iter(add_ns("g", namespace)))
+    if len(groups) > 0:
+        # Standard format: primitives are inside <g> group tags
+        for group in groups:
+            # Skip empty layer
+            if len(group) == 0:
                 continue
-            # ------------------ get ids ----------------- #
-            # In FloorPlanCAD dataset, semanticId starts from 1 to 35, and instanceId starts from 1,
-            # instanceId=-1 means uncountable semantic.
-            # we define semanticId=36 for background and instanceId=-1 for background/uncountable
-            semantic_id = int(primitive.attrib.get("semanticId", 36))
-            if semantic_id == 36: # background semantic
-                instance_id = -1
-            else: # valid semantic
-                instance_id = int(primitive.attrib.get("instanceId", -1))
-            semantic_id -= 1  # shift id from [1, 36] to [0, 35] for better compatibility
-            # ---------------- append data --------------- #
-            for coord in sampled_coords:
-                svg_data.coords.append(coord)
-                svg_data.colors.append(prim_color)
-                svg_data.widths.append(prim_width)
-                svg_data.primitive_ids.append(primitive_id)
-                svg_data.layer_ids.append(layer_id)
-            svg_data.semantic_ids.append(semantic_id)
-            svg_data.instance_ids.append(instance_id)
-            svg_data.primitive_lengths.append(prim_length)
-            # -------------------------------------------- #
-            primitive_id += 1
-        layer_id += 1
+            for primitive in group:
+                primitive_id = _process_primitive(primitive, layer_id, primitive_id, svg_data)
+            layer_id += 1
+    else:
+        # Fallback: no <g> tags, iterate over root children directly
+        # All elements get layer_id=0 since there are no groups
+        drawable_tags = {add_ns(t, namespace) for t in ("path", "circle", "ellipse", "rect", "line", "polyline", "polygon")}
+        for child in root:
+            if child.tag in drawable_tags:
+                primitive_id = _process_primitive(child, layer_id, primitive_id, svg_data)
 
     return svg_data
+
+
+def validate_labels(svg_data: SVGData) -> list[tuple[int, str, int, str]]:
+    """
+    Validate semantic/instance label combinations and return invalid ones.
+    Label conventions (after -1 shift): Thing=0-29, Stuff=30-34, Background=35.
+
+    Returns:
+        List of (prim_idx, svg_semantic_id_str, instance_id, reason) tuples for invalid labels.
+    """
+    invalid_labels = []
+    for prim_idx, (sem_id, ins_id) in enumerate(
+            zip(svg_data.semantic_ids, svg_data.instance_ids)):
+        svg_sem_id = str(sem_id + 1) if sem_id < 35 else "none"
+        if sem_id == 35 and ins_id >= 0:
+            invalid_labels.append((prim_idx, svg_sem_id, ins_id, "background with instanceId"))
+        elif sem_id < 30 and ins_id == -1:
+            invalid_labels.append((prim_idx, svg_sem_id, ins_id, "thing class without instanceId"))
+        elif 30 <= sem_id < 35 and ins_id != -1:
+            invalid_labels.append((prim_idx, svg_sem_id, ins_id, "stuff class with instanceId"))
+    return invalid_labels
 
 
 def save_svg(svg_data: SVGData, output_file_path: str) -> None:
@@ -308,7 +405,7 @@ def save_json(svg_data: SVGData, output_file_path: str) -> None:
         f.write(json.dumps(svg_data.__dict__))
 
 
-def process_svg(process_args: ProcessArgs) -> None:
+def process_svg(process_args: ProcessArgs) -> Optional[tuple[str, list]]:
     # Prepare input and output file paths
     input_file_path = os.path.join(process_args.input_dir,
                                    process_args.file_path)
@@ -321,6 +418,8 @@ def process_svg(process_args: ProcessArgs) -> None:
                          connect_lines=process_args.connect_lines,
                          dynamic_sampling=process_args.dynamic_sampling,
                          dynamic_sampling_ratio=process_args.dynamic_sampling_ratio)
+    # Validate labels
+    invalid_labels = validate_labels(svg_data)
     # Create output directory if not exists
     if not os.path.exists(os.path.dirname(output_file_path)):
         os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
@@ -330,6 +429,10 @@ def process_svg(process_args: ProcessArgs) -> None:
     elif process_args.save_type == "json":
         output_file_path = output_file_path.replace(".svg", ".json")
         save_json(svg_data, output_file_path)
+    # Return invalid labels with file path for aggregation
+    if invalid_labels:
+        return (process_args.file_path, invalid_labels)
+    return None
 
 
 def parse_args():
@@ -446,10 +549,37 @@ def main():
     ]
 
     # Process svg files in parallel
-    parallel_map(process_svg,
-                 job_args_list,
-                 max_workers=args.max_workers,
-                 use_progress_bar=args.use_progress_bar)
+    results = parallel_map(process_svg,
+                           job_args_list,
+                           max_workers=args.max_workers,
+                           use_progress_bar=args.use_progress_bar)
+
+    # Collect and write invalid labels report
+    all_invalid = [r for r in results if r is not None]
+    if all_invalid:
+        log_file = os.path.join(args.output_dir, "invalid_labels.log")
+        total_invalid = 0
+        with open(log_file, "w") as f:
+            f.write("=" * 60 + "\n")
+            f.write("INVALID LABELS REPORT\n")
+            f.write("=" * 60 + "\n")
+            f.write(f"Input directory: {args.input_dir}\n")
+            f.write(f"Total files processed: {len(svg_file_paths)}\n")
+            f.write(f"Files with invalid labels: {len(all_invalid)}\n")
+            f.write("=" * 60 + "\n\n")
+            for file_path, invalid_labels in all_invalid:
+                f.write(f"[{file_path}]\n")
+                for prim_idx, svg_sem_id, ins_id, reason in invalid_labels:
+                    f.write(f"  primitive {prim_idx}: semanticId={svg_sem_id}, instanceId={ins_id} ({reason})\n")
+                    total_invalid += 1
+                f.write("\n")
+            f.write("-" * 60 + "\n")
+            f.write(f"Total: {len(all_invalid)} files with {total_invalid} invalid labels\n")
+            f.write("-" * 60 + "\n")
+        print(f"\n[WARNING] Found {total_invalid} invalid labels in {len(all_invalid)} files.")
+        print(f"See details in: {log_file}")
+    else:
+        print("\nNo invalid labels found.")
 
 
 if __name__ == "__main__":

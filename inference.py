@@ -6,6 +6,15 @@ Standalone inference script for VecFormer model.
 - Does NOT save model checkpoints
 - Saves inference results to output directory
 - Outputs model_output.npy compatible with svg_visualize_v3.py
+
+# made by EFCK - Custom data adaptation (ported from SymPointV2):
+#   1. IGNORE_LABEL_MODES: Named presets for multi-class ignore labels (background_only, poilabs)
+#   2. --ignore_mode CLI argument: Select which classes to ignore during evaluation
+#   3. load_model(): Override evaluator/metrics ignore_label from CLI argument
+#   4. has_ground_truth(): Detect if preprocessed data has real GT labels
+#   5. compute_metrics(): Filter ignored classes from PQ/F1 aggregation
+#   6. run_inference(): Conditional metric accumulation based on GT availability
+#   7. save_results(): Report GT status in log file, JSON output, and console
 """
 
 import argparse
@@ -14,7 +23,7 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import Dict
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
@@ -35,6 +44,15 @@ DEFAULT_OUTPUT_DIR = "./results/floorplancad_test/"
 DEFAULT_DEVICE = "cuda"
 DEFAULT_FP16 = False  # Disabled due to spconv compatibility issues
 # --------------------------------------------------------------------- #
+
+
+# Predefined ignore label modes for evaluation.
+# "background_only": Only ignore background class (for original FloorPlanCAD evaluation)
+# "poilabs": Ignore background + classes not present in Poilabs data
+IGNORE_LABEL_MODES = {
+    "background_only": [35],
+    "poilabs": [35, 3, 5, 7, 8, 9, 11, 14, 15, 17, 19, 20, 21, 22, 23],
+}
 
 
 def get_args():
@@ -75,16 +93,38 @@ def get_args():
         default=False,
         help="Log total inference time and peak GPU memory usage",
     )
+    parser.add_argument(
+        "--ignore_mode",
+        type=str,
+        default="background_only",
+        choices=list(IGNORE_LABEL_MODES.keys()),
+        help="Ignore label mode for evaluation: "
+             "'background_only' ignores only background (class 35), "
+             "'poilabs' ignores background + classes not in Poilabs data",
+    )
     args = parser.parse_args()
     return args
 
 
-def load_model(checkpoint_path: str, device: str):
-    """Load VecFormer model from checkpoint"""
+def load_model(checkpoint_path: str, device: str, ignore_label: Optional[List[int]] = None):
+    """Load VecFormer model from checkpoint.
+
+    Args:
+        checkpoint_path: Path to checkpoint directory.
+        device: Device to load model on.
+        ignore_label: List of class indices to ignore in evaluation.
+            If provided, overrides the default config value.
+    """
     from model.vecformer import VecFormer, VecFormerConfig
 
     # Use default model config
     config = VecFormerConfig()
+
+    # Override ignore_label in evaluator and metrics_computer configs
+    if ignore_label is not None:
+        config.evaluator_config["ignore_label"] = ignore_label
+        config.metrics_computer_config["ignore_label"] = ignore_label
+
     model = VecFormer(config)
 
     # Load checkpoint
@@ -150,11 +190,57 @@ def json_path_to_svg_path(json_path: str) -> str:
     return json_path.replace(".json", ".svg")
 
 
-def compute_metrics(metric_states: Dict, f1_states: Dict, config) -> Dict:
-    """Compute final metrics from accumulated states"""
+def has_ground_truth(json_path: str) -> bool:
+    """Check if a preprocessed JSON data file has ground truth labels.
+
+    Returns True if the file has non-background semantic labels (i.e., real GT).
+    Files with only background (semantic_id=35) or no labels are considered to
+    have no ground truth.
+
+    The preprocessed JSON uses field names 'semantic_ids' and 'instance_ids',
+    with semantic IDs shifted to [0, 35] where 35 is background.
+
+    Adapted from SymPointV2's has_ground_truth() function.
+    """
+    data = json.load(open(json_path))
+    semantic_ids = data.get("semantic_ids", [])
+    instance_ids = data.get("instance_ids", [])
+
+    if len(semantic_ids) == 0:
+        return False
+    # If all semantic IDs are background (35), no GT
+    if all(sid == 35 for sid in semantic_ids):
+        return False
+    # If any instance IDs are valid (>= 0), we have some GT
+    if any(iid >= 0 for iid in instance_ids):
+        return True
+    # If we have non-background semantic IDs, we have some GT
+    return any(sid < 35 for sid in semantic_ids)
+
+
+def compute_metrics(
+    metric_states: Optional[Dict],
+    f1_states: Optional[Dict],
+    config,
+    ignore_label: Optional[List[int]] = None,
+) -> Dict:
+    """Compute final metrics from accumulated states.
+
+    Args:
+        metric_states: Accumulated PQ metric states (tp/fp/fn per class).
+        f1_states: Accumulated F1 metric states (tp/pred/gt per class).
+        config: VecFormerConfig with thing_class_idxs and stuff_class_idxs.
+        ignore_label: List of class indices to exclude from metric computation.
+            If None, defaults to empty list (all classes included).
+    """
     eps = torch.finfo(torch.float32).eps
-    thing_class_idxs = config.thing_class_idxs
-    stuff_class_idxs = config.stuff_class_idxs
+    ignore_label = ignore_label or []
+    ignore_set = set(ignore_label)
+
+    # Filter thing/stuff indices to exclude ignored classes
+    thing_class_idxs = [i for i in config.thing_class_idxs if i not in ignore_set]
+    stuff_class_idxs = [i for i in config.stuff_class_idxs if i not in ignore_set]
+    valid_all_idxs = thing_class_idxs + stuff_class_idxs
 
     metrics = {}
 
@@ -171,13 +257,18 @@ def compute_metrics(metric_states: Dict, f1_states: Dict, config) -> Dict:
             pq = rq * sq
             return pq, sq, rq
 
-        # Overall metrics
-        pq, sq, rq = calc_pq_metrics(tp.sum(), fp.sum(), fn.sum(), tp_iou.sum())
+        # Overall metrics (only valid classes)
+        pq, sq, rq = calc_pq_metrics(
+            tp[valid_all_idxs].sum(),
+            fp[valid_all_idxs].sum(),
+            fn[valid_all_idxs].sum(),
+            tp_iou[valid_all_idxs].sum(),
+        )
         metrics["PQ"] = pq.item() * 100
         metrics["SQ"] = sq.item() * 100
         metrics["RQ"] = rq.item() * 100
 
-        # Thing metrics
+        # Thing metrics (only valid thing classes)
         thing_pq, thing_sq, thing_rq = calc_pq_metrics(
             tp[thing_class_idxs].sum(),
             fp[thing_class_idxs].sum(),
@@ -188,7 +279,7 @@ def compute_metrics(metric_states: Dict, f1_states: Dict, config) -> Dict:
         metrics["thing_SQ"] = thing_sq.item() * 100
         metrics["thing_RQ"] = thing_rq.item() * 100
 
-        # Stuff metrics
+        # Stuff metrics (only valid stuff classes)
         stuff_pq, stuff_sq, stuff_rq = calc_pq_metrics(
             tp[stuff_class_idxs].sum(),
             fp[stuff_class_idxs].sum(),
@@ -199,19 +290,26 @@ def compute_metrics(metric_states: Dict, f1_states: Dict, config) -> Dict:
         metrics["stuff_SQ"] = stuff_sq.item() * 100
         metrics["stuff_RQ"] = stuff_rq.item() * 100
 
-    # F1 metrics
+    # F1 metrics (only valid classes)
     if f1_states:
-        tp = f1_states["tp_per_class"].float().sum()
-        pred = f1_states["pred_per_class"].float().sum()
-        gt = f1_states["gt_per_class"].float().sum()
+        # f1_states are shaped (num_classes+1,) — index by valid class idxs
+        tp_per = f1_states["tp_per_class"].float()
+        pred_per = f1_states["pred_per_class"].float()
+        gt_per = f1_states["gt_per_class"].float()
+        tp = tp_per[valid_all_idxs].sum()
+        pred = pred_per[valid_all_idxs].sum()
+        gt = gt_per[valid_all_idxs].sum()
         precision = tp / (pred + eps)
         recall = tp / (gt + eps)
         f1 = 2 * precision * recall / (precision + recall + eps)
         metrics["F1"] = f1.item()
 
-        w_tp = f1_states["w_tp_per_class"].float().sum()
-        w_pred = f1_states["w_pred_per_class"].float().sum()
-        w_gt = f1_states["w_gt_per_class"].float().sum()
+        w_tp_per = f1_states["w_tp_per_class"].float()
+        w_pred_per = f1_states["w_pred_per_class"].float()
+        w_gt_per = f1_states["w_gt_per_class"].float()
+        w_tp = w_tp_per[valid_all_idxs].sum()
+        w_pred = w_pred_per[valid_all_idxs].sum()
+        w_gt = w_gt_per[valid_all_idxs].sum()
         w_precision = w_tp / (w_pred + eps)
         w_recall = w_tp / (w_gt + eps)
         w_f1 = 2 * w_precision * w_recall / (w_precision + w_recall + eps)
@@ -294,8 +392,15 @@ def run_inference(
     fp16: bool = False,
     output_dir: str = "./results/floorplancad_test/",
     profile: bool = False,
+    ignore_label: Optional[List[int]] = None,
+    has_gt_data: bool = True,
 ):
-    """Run inference on dataset and return results with SymPointV2-compatible save dicts."""
+    """Run inference on dataset and return results with SymPointV2-compatible save dicts.
+
+    Args:
+        has_gt_data: Whether the dataset has ground truth labels. If False,
+            metric accumulation is skipped and metrics dict will be empty.
+    """
     from torch.utils.data import DataLoader
 
     dataloader = DataLoader(
@@ -363,8 +468,8 @@ def run_inference(
                         mem_info = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle)
                         per_sample_physical.append(mem_info.used)
 
-                # Accumulate metric states
-                if outputs.metric_states is not None:
+                # Accumulate metric states (only when GT is available)
+                if has_gt_data and outputs.metric_states is not None:
                     if accumulated_metric_states is None:
                         accumulated_metric_states = {
                             k: v.clone() for k, v in outputs.metric_states.items()
@@ -373,7 +478,7 @@ def run_inference(
                         for k, v in outputs.metric_states.items():
                             accumulated_metric_states[k] += v
 
-                if outputs.f1_states is not None:
+                if has_gt_data and outputs.f1_states is not None:
                     if accumulated_f1_states is None:
                         accumulated_f1_states = {
                             k: v.clone() for k, v in outputs.f1_states.items()
@@ -411,7 +516,10 @@ def run_inference(
                     raise e
 
     # Compute final metrics
-    metrics = compute_metrics(accumulated_metric_states, accumulated_f1_states, config)
+    metrics = compute_metrics(
+        accumulated_metric_states, accumulated_f1_states, config,
+        ignore_label=ignore_label,
+    )
 
     # Timing statistics
     avg_time = np.mean(inference_times) if inference_times else 0
@@ -472,6 +580,7 @@ def run_inference(
         "save_dicts": save_dicts,
         "timing": timing,
         "skipped_files": skipped_files,
+        "has_gt_data": has_gt_data,
     }
 
 
@@ -491,7 +600,12 @@ def save_results(results: Dict, output_dir: str, args):
         f.write(f"Checkpoint: {args.checkpoint}\n")
         f.write(f"Dataset: {args.datadir}\n")
         f.write(f"Device: {args.device}\n")
-        f.write(f"FP16: {args.fp16}\n\n")
+        f.write(f"FP16: {args.fp16}\n")
+        f.write(f"Ignore mode: {args.ignore_mode} ({IGNORE_LABEL_MODES[args.ignore_mode]})\n")
+        if results.get("has_gt_data", True):
+            f.write("Ground truth: available\n\n")
+        else:
+            f.write("Ground truth: not available — metrics not computed\n\n")
 
         f.write("-" * 60 + "\n")
         f.write("TIMING\n")
@@ -515,20 +629,23 @@ def save_results(results: Dict, output_dir: str, args):
         f.write("-" * 60 + "\n")
 
         metrics = results["metrics"]
-        if "PQ" in metrics:
-            f.write("\nPanoptic Segmentation:\n")
-            f.write(f"  PQ: {metrics['PQ']:.3f}  |  SQ: {metrics['SQ']:.3f}  |  RQ: {metrics['RQ']:.3f}\n\n")
+        if not metrics:
+            f.write("\nNo evaluation metrics — ground truth labels not available.\n\n")
+        else:
+            if "PQ" in metrics:
+                f.write("\nPanoptic Segmentation:\n")
+                f.write(f"  PQ: {metrics['PQ']:.3f}  |  SQ: {metrics['SQ']:.3f}  |  RQ: {metrics['RQ']:.3f}\n\n")
 
-            f.write("Thing classes:\n")
-            f.write(f"  PQ: {metrics['thing_PQ']:.3f}  |  SQ: {metrics['thing_SQ']:.3f}  |  RQ: {metrics['thing_RQ']:.3f}\n\n")
+                f.write("Thing classes:\n")
+                f.write(f"  PQ: {metrics['thing_PQ']:.3f}  |  SQ: {metrics['thing_SQ']:.3f}  |  RQ: {metrics['thing_RQ']:.3f}\n\n")
 
-            f.write("Stuff classes:\n")
-            f.write(f"  PQ: {metrics['stuff_PQ']:.3f}  |  SQ: {metrics['stuff_SQ']:.3f}  |  RQ: {metrics['stuff_RQ']:.3f}\n\n")
+                f.write("Stuff classes:\n")
+                f.write(f"  PQ: {metrics['stuff_PQ']:.3f}  |  SQ: {metrics['stuff_SQ']:.3f}  |  RQ: {metrics['stuff_RQ']:.3f}\n\n")
 
-        if "F1" in metrics:
-            f.write("Semantic Segmentation:\n")
-            f.write(f"  F1:  {metrics['F1']:.4f}\n")
-            f.write(f"  wF1: {metrics['wF1']:.4f}\n\n")
+            if "F1" in metrics:
+                f.write("Semantic Segmentation:\n")
+                f.write(f"  F1:  {metrics['F1']:.4f}\n")
+                f.write(f"  wF1: {metrics['wF1']:.4f}\n\n")
 
         if results["skipped_files"]:
             f.write("-" * 60 + "\n")
@@ -547,6 +664,9 @@ def save_results(results: Dict, output_dir: str, args):
                 "metrics": results["metrics"],
                 "timing": results["timing"],
                 "skipped_files": results["skipped_files"],
+                "has_ground_truth": results.get("has_gt_data", True),
+                "ignore_mode": args.ignore_mode,
+                "ignore_label": IGNORE_LABEL_MODES[args.ignore_mode],
             },
             f,
             indent=2,
@@ -563,6 +683,9 @@ def save_results(results: Dict, output_dir: str, args):
 def main():
     args = get_args()
 
+    # Resolve ignore labels from --ignore_mode
+    ignore_label = IGNORE_LABEL_MODES[args.ignore_mode]
+
     logger.info("=" * 60)
     logger.info("VecFormer Inference")
     logger.info("=" * 60)
@@ -571,15 +694,27 @@ def main():
     logger.info(f"Output Dir: {args.out}")
     logger.info(f"Device: {args.device}")
     logger.info(f"FP16: {args.fp16}")
+    logger.info(f"Ignore mode: {args.ignore_mode} ({ignore_label})")
 
     # Load model
     logger.info("\nLoading model...")
-    model, config = load_model(args.checkpoint, args.device)
+    model, config = load_model(args.checkpoint, args.device, ignore_label=ignore_label)
 
     # Load dataset
     logger.info("Loading dataset...")
     dataset, collate_fn = load_dataset(args.datadir)
     logger.info(f"Dataset size: {len(dataset)} samples")
+
+    # Check if dataset has ground truth labels
+    data_dir = dataset.data_dir
+    data_paths = dataset.data_paths
+    has_gt_data = any(
+        has_ground_truth(os.path.join(data_dir, p)) for p in data_paths
+    )
+    if has_gt_data:
+        logger.info("Ground truth labels detected - evaluation metrics will be computed")
+    else:
+        logger.info("No ground truth labels found - skipping evaluation metrics")
 
     # Run inference
     results = run_inference(
@@ -591,6 +726,8 @@ def main():
         fp16=args.fp16,
         output_dir=args.out,
         profile=args.profile,
+        ignore_label=ignore_label,
+        has_gt_data=has_gt_data,
     )
 
     # Print metrics
@@ -606,7 +743,11 @@ def main():
     if "F1" in metrics:
         logger.info(f"F1: {metrics['F1']:.4f}  |  wF1: {metrics['wF1']:.4f}")
 
+    if not metrics:
+        logger.info("No evaluation metrics (no ground truth)")
+
     logger.info(f"\nInference time: {results['timing']['total_time']:.2f}s ({results['timing']['avg_time_per_sample']:.4f}s/sample)")
+    logger.info(f"Predictions saved: {len(results['save_dicts'])}")
 
     if results["skipped_files"]:
         logger.warning(f"Skipped {len(results['skipped_files'])} files due to OOM")

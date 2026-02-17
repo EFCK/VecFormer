@@ -1,5 +1,10 @@
 """
 VecFormer model
+
+# made by EFCK - Custom data adaptation (ported from SymPointV2):
+#   1. prepare_targets(): Filter invalid (semantic_id, instance_id) pairs during training
+#      - background with instance ID, thing class without instance ID, stuff class with instance ID
+#   2. _init_queries(): Guard against targets=None to support inference without ground truth
 """
 from dataclasses import dataclass
 
@@ -181,6 +186,10 @@ class VecFormer(PreTrainedModel):
 
         targets_device = cu_numprims.device
 
+        # Pre-compute class index tensors for target filtering (avoids recreating per batch element)
+        thing_idxs = torch.tensor(self.thing_class_idxs, device=targets_device)
+        stuff_idxs = torch.tensor(self.stuff_class_idxs, device=targets_device)
+
         list_target_inst_labels = []
         list_target_inst_masks = []
         list_target_prim_lens = []
@@ -199,10 +208,23 @@ class VecFormer(PreTrainedModel):
                 torch.stack((batch_semantic_id, batch_instance_id), dim=0),
                 dim=1
             ).T     # shape: (num_unique_pairs, 2)
-            valid_mask = ~(
-                (unique_sem_inst_pairs[:, 0] == self.num_semantic_classes)
-                & (unique_sem_inst_pairs[:, 1] == -1)
-            )  # remove background
+            sem_ids = unique_sem_inst_pairs[:, 0]
+            inst_ids = unique_sem_inst_pairs[:, 1]
+
+            # Filter out invalid (semantic_id, instance_id) pairs:
+            # 1. Background with no instance (sem_id == num_semantic_classes and inst_id == -1)
+            is_bg_no_inst = (sem_ids == self.num_semantic_classes) & (inst_ids == -1)
+            # 2. Background with instance ID (sem_id == num_semantic_classes and inst_id >= 0)
+            #    SVG elements that have instanceId but no valid semanticId
+            is_bg_with_inst = (sem_ids == self.num_semantic_classes) & (inst_ids >= 0)
+            # 3. Thing class without instance ID (thing classes must have valid instance IDs)
+            is_thing = torch.isin(sem_ids, thing_idxs)
+            is_thing_no_inst = is_thing & (inst_ids < 0)
+            # 4. Stuff class with instance ID (stuff classes should not have instance labels)
+            is_stuff = torch.isin(sem_ids, stuff_idxs)
+            is_stuff_with_inst = is_stuff & (inst_ids != -1)
+
+            valid_mask = ~(is_bg_no_inst | is_bg_with_inst | is_thing_no_inst | is_stuff_with_inst)
             unique_sem_inst_pairs = unique_sem_inst_pairs[valid_mask]
 
             target_inst_labels = []
@@ -585,6 +607,8 @@ class VecFormer(PreTrainedModel):
             torch.cumsum(query_seq_lens, dim=0, dtype=torch.int32)
         ])
 
+        if targets is None:
+            targets = {}
         targets["list_target_selected_idxs"] = list_target_selected_idxs
 
         return torch.cat(queries, dim=0), query_cu_seqlens, targets

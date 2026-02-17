@@ -9,13 +9,13 @@ export PYTHONPATH=$(pwd):$PYTHONPATH
 
 # ==================== Configuration ==================== #
 # Dataset directory (contains train/val/test subdirectories)
-datadir=datasets/FloorPlanCAD-jsons/test
+datadir=datasets/ARI3-sampled-as-line-jsons
 
 # Model checkpoint directory (contains model.safetensors)
 checkpoint=configs/cp_98
 
 # Output directory for results
-out=results/floorplancad_test/cp_98/
+out=results/ARI3/cp_98/
 
 
 # ======================================================= #
@@ -24,4 +24,5 @@ python inference.py \
     --checkpoint $checkpoint \
     --datadir $datadir \
     --out $out \
-    --profile
+    --profile \
+    --ignore_mode poilabs

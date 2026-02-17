@@ -1,4 +1,10 @@
-from typing import Mapping, Dict, List
+# made by EFCK - Custom data adaptation (ported from SymPointV2):
+#   1. EvaluatorConfig.ignore_label: changed from single int to list[int] for multi-class ignore
+#   2. Evaluator.eval_panoptic_quality(): all == ignore_label comparisons changed to torch.isin()
+#   3. MetricsComputer: added ignore_label support to _compute_panoptic_quality() and
+#      _compute_f1_scores() — ignored classes are excluded from aggregate PQ/F1 metrics
+
+from typing import Mapping, Dict, List, Optional
 from dataclasses import dataclass
 import os
 import json
@@ -10,7 +16,7 @@ from transformers.trainer import EvalPrediction
 @dataclass
 class EvaluatorConfig:
     num_classes: int
-    ignore_label: int
+    ignore_label: list[int]
     iou_threshold: float
     output_dir: str
 
@@ -19,7 +25,7 @@ class Evaluator:
     def __init__(self, config: EvaluatorConfig):
         self.config = config
         self.num_classes = config.num_classes
-        self.ignore_label = config.ignore_label
+        self.ignore_label = config.ignore_label  # list[int]
         self.iou_threshold = config.iou_threshold
         self.output_dir = config.output_dir
 
@@ -96,6 +102,9 @@ class Evaluator:
             target_masks = targets["target_masks"][batch_idx]  # (num_targets, num_primitives)
             target_labels = targets["target_labels"][batch_idx]  # (num_targets,)
             prim_lens = log_prim_lens[batch_idx]  # (num_primitives,)
+
+            # Pre-compute ignore label tensor for isin checks
+            ignore_labels_t = torch.tensor(self.ignore_label, device=target_labels.device)
             
             # changed by efck: vectorized IoU computation to avoid O(n^2) Python loop
             # Skip if no predictions or targets
@@ -103,19 +112,19 @@ class Evaluator:
                 # Count all targets as false negatives
                 for target_idx in range(target_masks.shape[0]):
                     target_label = target_labels[target_idx]
-                    if target_label != self.ignore_label:
+                    if not torch.isin(target_label, ignore_labels_t):
                         fn_per_class[target_label] += 1
                 continue
             
             # Filter out ignored labels
-            valid_pred_mask = pred_labels != self.ignore_label
-            valid_target_mask = target_labels != self.ignore_label
+            valid_pred_mask = ~torch.isin(pred_labels, ignore_labels_t)
+            valid_target_mask = ~torch.isin(target_labels, ignore_labels_t)
             
             if not valid_pred_mask.any() or not valid_target_mask.any():
                 # Count valid targets as false negatives
                 for target_idx in range(target_masks.shape[0]):
                     target_label = target_labels[target_idx]
-                    if target_label != self.ignore_label:
+                    if not torch.isin(target_label, ignore_labels_t):
                         fn_per_class[target_label] += 1
                 continue
             
@@ -126,7 +135,7 @@ class Evaluator:
             # For each target, find predictions with IoU > threshold
             for target_idx in range(target_masks.shape[0]):
                 target_label = target_labels[target_idx]
-                if target_label == self.ignore_label:
+                if torch.isin(target_label, ignore_labels_t):
                     continue
                 
                 # Get IoU scores for this target with all predictions
@@ -143,7 +152,7 @@ class Evaluator:
                     found_match = False
                     for pred_idx in matching_pred_indices:
                         pred_label = pred_labels[pred_idx]
-                        if pred_label == self.ignore_label:
+                        if torch.isin(pred_label, ignore_labels_t):
                             continue
                         iou = target_ious[pred_idx]
                         if pred_label == target_label:
@@ -384,6 +393,7 @@ class MetricsComputerConfig:
     num_classes: int
     thing_class_idxs: List[int]
     stuff_class_idxs: List[int]
+    ignore_label: Optional[List[int]] = None
     log_per_class_metrics: bool = False
 
 
@@ -392,6 +402,7 @@ class MetricsComputer:
         self.num_classes = config.num_classes
         self.thing_class_idxs = config.thing_class_idxs
         self.stuff_class_idxs = config.stuff_class_idxs
+        self.ignore_label = config.ignore_label if config.ignore_label is not None else []
         self.log_per_class_metrics = config.log_per_class_metrics
         self.dict_sublosses = {}
         self.metric_states = {}
@@ -432,18 +443,26 @@ class MetricsComputer:
     def _compute_f1_scores(self) -> Dict[str, float]:
         results = {}
         eps = torch.finfo(torch.float32).eps
-        # calculate total F1 and wF1
 
-        tp = self.f1_states["tp_per_class"].sum()
-        pred = self.f1_states["pred_per_class"].sum()
-        gt = self.f1_states["gt_per_class"].sum()
+        # Build valid class mask (exclude ignored classes) for F1 computation
+        # f1_states tensors have shape (num_classes + 1,) where last element is background
+        num_f1_classes = self.num_classes + 1
+        valid_f1_mask = torch.ones(num_f1_classes, dtype=torch.bool)
+        for il in self.ignore_label:
+            if il < num_f1_classes:
+                valid_f1_mask[il] = False
+
+        # calculate total F1 and wF1 (excluding ignored classes)
+        tp = self.f1_states["tp_per_class"][valid_f1_mask].sum()
+        pred = self.f1_states["pred_per_class"][valid_f1_mask].sum()
+        gt = self.f1_states["gt_per_class"][valid_f1_mask].sum()
         precision = tp / (pred + eps)
         recall = tp / (gt + eps)
         f1 = 2 * precision * recall / (precision + recall + eps)
 
-        w_tp = self.f1_states["w_tp_per_class"].sum()
-        w_pred = self.f1_states["w_pred_per_class"].sum()
-        w_gt = self.f1_states["w_gt_per_class"].sum()
+        w_tp = self.f1_states["w_tp_per_class"][valid_f1_mask].sum()
+        w_pred = self.f1_states["w_pred_per_class"][valid_f1_mask].sum()
+        w_gt = self.f1_states["w_gt_per_class"][valid_f1_mask].sum()
         w_precision = w_tp / (w_pred + eps)
         w_recall = w_tp / (w_gt + eps)
         w_f1 = 2 * w_precision * w_recall / (w_precision + w_recall + eps)
@@ -483,6 +502,8 @@ class MetricsComputer:
             f1_values = torch.stack(f1_per_class).cpu().tolist()
             wf1_values = torch.stack(wf1_per_class).cpu().tolist()
             for i in range(self.num_classes):
+                if i in self.ignore_label:
+                    continue
                 results[f"class_{i + 1}_F1"] = f1_values[i]
                 results[f"class_{i + 1}_wF1"] = wf1_values[i]
             
@@ -580,6 +601,10 @@ class MetricsComputer:
         metric_states = self.metric_states
         thing_class_idxs = self.thing_class_idxs
         stuff_class_idxs = self.stuff_class_idxs
+        # Filter out ignored class indices from thing/stuff lists
+        valid_thing_idxs = [i for i in thing_class_idxs if i not in self.ignore_label]
+        valid_stuff_idxs = [i for i in stuff_class_idxs if i not in self.ignore_label]
+        valid_all_idxs = valid_thing_idxs + valid_stuff_idxs
         tp_per_class = metric_states["tp_per_class"].to(torch.float32)
         fp_per_class = metric_states["fp_per_class"].to(torch.float32)
         fn_per_class = metric_states["fn_per_class"].to(torch.float32)
@@ -605,27 +630,28 @@ class MetricsComputer:
             class_metrics = {
                 f"class_{id + 1}_PQ": pq_values[id]
                 for id in range(len(pq_per_class))
+                if id not in self.ignore_label
             }
 
         thing_pq, thing_sq, thing_rq = cal_scores(
-            tp_per_class[thing_class_idxs].sum(),
-            fp_per_class[thing_class_idxs].sum(),
-            fn_per_class[thing_class_idxs].sum(),
-            tp_iou_score_per_class[thing_class_idxs].sum(),
+            tp_per_class[valid_thing_idxs].sum(),
+            fp_per_class[valid_thing_idxs].sum(),
+            fn_per_class[valid_thing_idxs].sum(),
+            tp_iou_score_per_class[valid_thing_idxs].sum(),
         )
 
         stuff_pq, stuff_sq, stuff_rq = cal_scores(
-            tp_per_class[stuff_class_idxs].sum(),
-            fp_per_class[stuff_class_idxs].sum(),
-            fn_per_class[stuff_class_idxs].sum(),
-            tp_iou_score_per_class[stuff_class_idxs].sum(),
+            tp_per_class[valid_stuff_idxs].sum(),
+            fp_per_class[valid_stuff_idxs].sum(),
+            fn_per_class[valid_stuff_idxs].sum(),
+            tp_iou_score_per_class[valid_stuff_idxs].sum(),
         )
 
         pq, sq, rq = cal_scores(
-            tp_per_class.sum(),
-            fp_per_class.sum(),
-            fn_per_class.sum(),
-            tp_iou_score_per_class.sum(),
+            tp_per_class[valid_all_idxs].sum(),
+            fp_per_class[valid_all_idxs].sum(),
+            fn_per_class[valid_all_idxs].sum(),
+            tp_iou_score_per_class[valid_all_idxs].sum(),
         )
 
         self.metric_states.clear()
