@@ -1,0 +1,29 @@
+# VecFormer model config for Poilabs fine-tuning
+# made by EFCK
+#
+# Identical to vecformer.yaml except ignore_label is set to the Poilabs preset:
+# classes absent in Poilabs data are excluded from evaluation metrics (PQ, mIoU, F1)
+# during training. The model still trains on all classes present in the data.
+#
+# To use: pass --model_args_path configs/model/vecformer_poilabs.yaml to launch.py
+#
+# ignore_label class indices (0-indexed):
+#   35 = background (always ignored)
+#    3 = folding door
+#    5 = rolling door
+#    7 = bay window
+#    8 = blind window
+#    9 = opening symbol
+#   11 = bed
+#   14 = TV cabinet
+#   15 = Wardrobe
+#   17 = gas stove
+#   19 = refrigerator
+#   20 = airconditioner
+#   21 = bath
+#   22 = bath tub
+#   23 = washing machine
+
+model_name: vecformer
+model_args:
+  ignore_label: [35, 3, 5, 7, 8, 9, 11, 14, 15, 17, 19, 20, 21, 22, 23]

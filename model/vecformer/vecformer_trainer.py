@@ -93,11 +93,20 @@ class WandbBestMetricCallback(TrainerCallback):
 
 class VecFormerTrainer(Trainer):
     def __init__(self, *args, **kwargs):
+        # Use the actual model's config for MetricsComputer so that ignore_label
+        # and other settings match what the model was built with.
+        # Fall back to VecFormerConfig() defaults if model is not provided.
+        # made by EFCK: previously always used VecFormerConfig() (defaults), which
+        # meant ignore_label was always [35] regardless of the model config YAML.
+        model = kwargs.get("model") or (args[0] if args else None)
+        mc_config = (
+            model.config.metrics_computer_config
+            if model is not None and hasattr(model, "config")
+            else VecFormerConfig().metrics_computer_config
+        )
         super().__init__(
             *args,
-            compute_metrics=MetricsComputer(
-                MetricsComputerConfig(**VecFormerConfig().metrics_computer_config)
-            ),
+            compute_metrics=MetricsComputer(MetricsComputerConfig(**mc_config)),
             **kwargs,
         )
         self.label_names = [

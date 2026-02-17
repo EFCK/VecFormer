@@ -4,6 +4,10 @@ VecFormer configuration
 # made by EFCK - Custom data adaptation (ported from SymPointV2):
 #   1. evaluator_config["ignore_label"]: changed from int to list[int] (e.g. [35])
 #   2. metrics_computer_config["ignore_label"]: propagated from evaluator_config
+#   3. ignore_label: added as explicit top-level constructor parameter.
+#      Defaults to [num_semantic_classes] (background only). Can be overridden
+#      via model_args in the model config YAML (e.g. vecformer_poilabs.yaml).
+#      Stored as self.ignore_label for access by trainer and model.
 """
 
 from transformers import PretrainedConfig
@@ -18,6 +22,7 @@ class VecFormerConfig(PretrainedConfig):
         num_semantic_classes: int = 35,  # number of semantic classes of dataset
         thing_class_idxs: list[int] = [i for i in range(30)],  # thing class idxs
         stuff_class_idxs: list[int] = [30, 31, 32, 33, 34],  # stuff class idxs
+        ignore_label: list = None,  # class indices to ignore in evaluation (None -> background only)
         use_layer_fusion: bool = True,  # (`bool`): whether to use layer fusion enhancement
         query_thr=0.5,  # (`float`): query threshold, used only in training
         max_num_queries=-1,  # (`int`): max number of queries, used only in training
@@ -147,13 +152,16 @@ class VecFormerConfig(PretrainedConfig):
         self.mask_logit_thr: float = mask_logit_thr
         self.n_primitives_thr: int = n_primitives_thr
         self.whether_output_instance = whether_output_instance
+        # Resolve ignore_label: use provided list, or fall back to background-only
+        _ignore_label = ignore_label if ignore_label is not None else [num_semantic_classes]
+        self.ignore_label: list[int] = _ignore_label
         # Evaluator
         evaluator_config["num_classes"] = num_semantic_classes
-        evaluator_config["ignore_label"] = [num_semantic_classes]  # list of class indices to ignore
+        evaluator_config["ignore_label"] = _ignore_label
         self.evaluator_config: dict = evaluator_config
         # MetricsComputer
         metrics_computer_config["num_classes"] = num_semantic_classes
         metrics_computer_config["thing_class_idxs"] = thing_class_idxs
         metrics_computer_config["stuff_class_idxs"] = stuff_class_idxs
-        metrics_computer_config["ignore_label"] = evaluator_config["ignore_label"]
+        metrics_computer_config["ignore_label"] = _ignore_label
         self.metrics_computer_config: dict = metrics_computer_config
