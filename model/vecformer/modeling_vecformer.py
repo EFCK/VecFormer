@@ -682,6 +682,9 @@ class VecFormer(PreTrainedModel):
         loss, dict_sublosses, metric_states, f1_states = None, None, None, None
         raw_sem_logits = None
         output_targets = None
+        dict_pred_sem_segs = None
+        dict_pred_inst_segs = None
+        dict_pred_panop_segs = None
         # ---------------- calculate loss ---------------- #
         if targets is not None and self.training:
             # calculate panoptic symbol spotting loss
