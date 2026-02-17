@@ -326,7 +326,8 @@ class Evaluator:
             pred_labels = preds["pred_labels"][batch_idx]
             pred_masks = preds["pred_masks"][batch_idx]
             data_path = data_paths[batch_idx]
-            data_split, data_name = data_path.split("/")[-2:]
+            data_split = os.path.basename(os.path.dirname(data_path))
+            data_name = os.path.basename(data_path)
             output_path = os.path.join(self.output_dir, data_split, data_name)
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
