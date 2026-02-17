@@ -4,11 +4,11 @@
 #   3. parse_svg(): Fallback for SVGs without <g> group tags (iterate root children directly)
 #   4. validate_labels(): Log invalid semantic/instance ID combinations
 #   5. main(): SymPointV2-style output layout:
-#        --output_dir is the BASE directory; subdirs are auto-created:
+#        --output_dir defaults to parent of --input_dir; subdirs are auto-created:
 #          <base>/line_json/<input_folder>/  (if --connect_lines)
 #          <base>/point_json/<input_folder>/ (otherwise)
 #          <base>/svg/<input_folder>/        (copies of original SVG files)
-#        invalid_labels.log is written to <base>/
+#          <base>/logs/<input_folder>/       (invalid_labels.log)
 
 import os
 import json
@@ -449,10 +449,12 @@ def parse_args():
                         help="Input directory")
     parser.add_argument("--output_dir",
                         type=str,
-                        required=True,
-                        help="Base output directory. Subdirs are created automatically: "
+                        default=None,
+                        help="Base output directory. Defaults to the parent of --input_dir. "
+                             "Subdirs are created automatically: "
                              "line_json/<input_folder>/ or point_json/<input_folder>/ "
-                             "for JSON files, and svg/<input_folder>/ for original SVG copies.")
+                             "for JSON files, svg/<input_folder>/ for original SVG copies, "
+                             "and logs/<input_folder>/ for the invalid_labels.log.")
     parser.add_argument("--save_type",
                         type=str,
                         default="json",
@@ -516,13 +518,18 @@ def main():
     # --- Compute output subdirectories (SymPointV2-style layout) ---
     # input folder name becomes the leaf directory under each subdir
     input_name = os.path.basename(os.path.normpath(args.input_dir))
+    # default base dir = parent of input_dir
+    base_dir = args.output_dir if args.output_dir is not None \
+        else os.path.dirname(os.path.normpath(args.input_dir))
     json_mode = "line_json" if args.connect_lines else "point_json"
-    json_output_dir = os.path.join(args.output_dir, json_mode, input_name)
-    svg_output_dir  = os.path.join(args.output_dir, "svg", input_name)
+    json_output_dir = os.path.join(base_dir, json_mode, input_name)
+    svg_output_dir  = os.path.join(base_dir, "svg", input_name)
+    log_output_dir  = os.path.join(base_dir, "logs", input_name)
 
     print(f"Input  : {args.input_dir}")
     print(f"JSON   : {json_output_dir}")
     print(f"SVG    : {svg_output_dir}")
+    print(f"Logs   : {log_output_dir}")
 
     # Get all svg file paths
     svg_file_paths = scan_dir(args.input_dir, "svg")
@@ -550,6 +557,7 @@ def main():
     # Create output directories
     os.makedirs(json_output_dir, exist_ok=True)
     os.makedirs(svg_output_dir, exist_ok=True)
+    os.makedirs(log_output_dir, exist_ok=True)
 
     # Prepare job arguments — pass resolved json_output_dir as output_dir
     line_t_values = get_t_values(args.sample_lines)
@@ -583,7 +591,7 @@ def main():
 
     # Collect and write invalid labels report to base output_dir
     all_invalid = [r for r in results if r is not None]
-    log_file = os.path.join(args.output_dir, "invalid_labels.log")
+    log_file = os.path.join(log_output_dir, "invalid_labels.log")
     total_invalid = 0
     with open(log_file, "w") as f:
         f.write("=" * 60 + "\n")
