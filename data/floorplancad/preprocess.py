@@ -3,12 +3,18 @@
 #   2. parse_primitive(): Skip zero-length/degenerate paths (prim_length < 1e-10)
 #   3. parse_svg(): Fallback for SVGs without <g> group tags (iterate root children directly)
 #   4. validate_labels(): Log invalid semantic/instance ID combinations
-#   5. main(): Write invalid_labels.log with per-file label validation results
+#   5. main(): SymPointV2-style output layout:
+#        --output_dir is the BASE directory; subdirs are auto-created:
+#          <base>/line_json/<input_folder>/  (if --connect_lines)
+#          <base>/point_json/<input_folder>/ (otherwise)
+#          <base>/svg/<input_folder>/        (copies of original SVG files)
+#        invalid_labels.log is written to <base>/
 
 import os
 import json
 import math
 import re
+import shutil
 import argparse
 import xml.etree.cElementTree as ET
 from typing import Optional
@@ -444,7 +450,9 @@ def parse_args():
     parser.add_argument("--output_dir",
                         type=str,
                         required=True,
-                        help="Output directory")
+                        help="Base output directory. Subdirs are created automatically: "
+                             "line_json/<input_folder>/ or point_json/<input_folder>/ "
+                             "for JSON files, and svg/<input_folder>/ for original SVG copies.")
     parser.add_argument("--save_type",
                         type=str,
                         default="json",
@@ -505,6 +513,17 @@ def parse_args():
 def main():
     args = parse_args()
 
+    # --- Compute output subdirectories (SymPointV2-style layout) ---
+    # input folder name becomes the leaf directory under each subdir
+    input_name = os.path.basename(os.path.normpath(args.input_dir))
+    json_mode = "line_json" if args.connect_lines else "point_json"
+    json_output_dir = os.path.join(args.output_dir, json_mode, input_name)
+    svg_output_dir  = os.path.join(args.output_dir, "svg", input_name)
+
+    print(f"Input  : {args.input_dir}")
+    print(f"JSON   : {json_output_dir}")
+    print(f"SVG    : {svg_output_dir}")
+
     # Get all svg file paths
     svg_file_paths = scan_dir(args.input_dir, "svg")
 
@@ -528,17 +547,17 @@ def main():
         for dir_name in svg_file_paths_dict:
             svg_file_paths.extend(svg_file_paths_dict[dir_name])
 
-    # Create output directory if not exists
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir, exist_ok=True)
+    # Create output directories
+    os.makedirs(json_output_dir, exist_ok=True)
+    os.makedirs(svg_output_dir, exist_ok=True)
 
-    # Prepare job arguments
+    # Prepare job arguments — pass resolved json_output_dir as output_dir
     line_t_values = get_t_values(args.sample_lines)
     curve_t_values = get_t_values(args.sample_curves)
     job_args_list = [
         ProcessArgs(file_path=file_path,
                     input_dir=args.input_dir,
-                    output_dir=args.output_dir,
+                    output_dir=json_output_dir,
                     save_type=args.save_type,
                     connect_lines=args.connect_lines,
                     line_t_values=line_t_values,
@@ -554,19 +573,27 @@ def main():
                            max_workers=args.max_workers,
                            use_progress_bar=args.use_progress_bar)
 
-    # Collect and write invalid labels report
+    # Copy original SVG files into svg_output_dir, preserving relative structure
+    print(f"\nCopying {len(svg_file_paths)} SVG file(s) to {svg_output_dir} ...")
+    for file_path in svg_file_paths:
+        src = os.path.join(args.input_dir, file_path)
+        dst = os.path.join(svg_output_dir, file_path)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+
+    # Collect and write invalid labels report to base output_dir
     all_invalid = [r for r in results if r is not None]
-    if all_invalid:
-        log_file = os.path.join(args.output_dir, "invalid_labels.log")
-        total_invalid = 0
-        with open(log_file, "w") as f:
-            f.write("=" * 60 + "\n")
-            f.write("INVALID LABELS REPORT\n")
-            f.write("=" * 60 + "\n")
-            f.write(f"Input directory: {args.input_dir}\n")
-            f.write(f"Total files processed: {len(svg_file_paths)}\n")
-            f.write(f"Files with invalid labels: {len(all_invalid)}\n")
-            f.write("=" * 60 + "\n\n")
+    log_file = os.path.join(args.output_dir, "invalid_labels.log")
+    total_invalid = 0
+    with open(log_file, "w") as f:
+        f.write("=" * 60 + "\n")
+        f.write("INVALID LABELS REPORT\n")
+        f.write("=" * 60 + "\n")
+        f.write(f"Input directory: {args.input_dir}\n")
+        f.write(f"Total files processed: {len(svg_file_paths)}\n")
+        f.write(f"Files with invalid labels: {len(all_invalid)}\n")
+        f.write("=" * 60 + "\n\n")
+        if all_invalid:
             for file_path, invalid_labels in all_invalid:
                 f.write(f"[{file_path}]\n")
                 for prim_idx, svg_sem_id, ins_id, reason in invalid_labels:
@@ -576,6 +603,9 @@ def main():
             f.write("-" * 60 + "\n")
             f.write(f"Total: {len(all_invalid)} files with {total_invalid} invalid labels\n")
             f.write("-" * 60 + "\n")
+        else:
+            f.write("No invalid labels found.\n")
+    if total_invalid > 0:
         print(f"\n[WARNING] Found {total_invalid} invalid labels in {len(all_invalid)} files.")
         print(f"See details in: {log_file}")
     else:
