@@ -9,12 +9,15 @@ Standalone inference script for VecFormer model.
 
 # made by EFCK - Custom data adaptation (ported from SymPointV2):
 #   1. IGNORE_LABEL_MODES: Named presets for multi-class ignore labels (background_only, poilabs)
-#   2. --ignore_mode CLI argument: Select which classes to ignore during evaluation
-#   3. load_model(): Override evaluator/metrics ignore_label from CLI argument
-#   4. has_ground_truth(): Detect if preprocessed data has real GT labels
-#   5. compute_metrics(): Filter ignored classes from PQ/F1 aggregation
-#   6. run_inference(): Conditional metric accumulation based on GT availability
-#   7. save_results(): Report GT status in log file, JSON output, and console
+#   2. CLASS_NAMES: FloorPlanCAD class name list (35 foreground + background)
+#   3. --ignore_mode CLI argument: Select which classes to ignore during evaluation
+#   4. load_model(): Override evaluator/metrics ignore_label from CLI argument
+#   5. has_ground_truth(): Detect if preprocessed data has real GT labels
+#   6. compute_metrics(): Per-class PQ (TP/FP/FN), per-class IoU, mIoU/fwIoU/pACC,
+#      all filtered by ignore_label
+#   7. run_inference(): Conditional metric accumulation based on GT availability
+#   8. save_results(): SymPointV2-style detailed log with semantic + panoptic sections,
+#      per-class breakdown, total counts, GT status
 """
 
 import argparse
@@ -53,6 +56,47 @@ IGNORE_LABEL_MODES = {
     "background_only": [35],
     "poilabs": [35, 3, 5, 7, 8, 9, 11, 14, 15, 17, 19, 20, 21, 22, 23],
 }
+
+# FloorPlanCAD class names (0-indexed, 35 foreground classes + background at index 35).
+# Matches SymPointV2's SVG_CATEGORIES (id 1-35 -> index 0-34).
+CLASS_NAMES = [
+    "single door",    # 0  (thing)
+    "double door",    # 1  (thing)
+    "sliding door",   # 2  (thing)
+    "folding door",   # 3  (thing)
+    "revolving door", # 4  (thing)
+    "rolling door",   # 5  (thing)
+    "window",         # 6  (thing)
+    "bay window",     # 7  (thing)
+    "blind window",   # 8  (thing)
+    "opening symbol", # 9  (thing)
+    "sofa",           # 10 (thing)
+    "bed",            # 11 (thing)
+    "chair",          # 12 (thing)
+    "table",          # 13 (thing)
+    "TV cabinet",     # 14 (thing)
+    "Wardrobe",       # 15 (thing)
+    "cabinet",        # 16 (thing)
+    "gas stove",      # 17 (thing)
+    "sink",           # 18 (thing)
+    "refrigerator",   # 19 (thing)
+    "airconditioner", # 20 (thing)
+    "bath",           # 21 (thing)
+    "bath tub",       # 22 (thing)
+    "washing machine",# 23 (thing)
+    "squat toilet",   # 24 (thing)
+    "urinal",         # 25 (thing)
+    "toilet",         # 26 (thing)
+    "stairs",         # 27 (thing)
+    "elevator",       # 28 (thing)
+    "escalator",      # 29 (thing)
+    "row chairs",     # 30 (stuff)
+    "parking spot",   # 31 (stuff)
+    "wall",           # 32 (stuff)
+    "curtain wall",   # 33 (stuff)
+    "railing",        # 34 (stuff)
+    "background",     # 35 (background — always ignored)
+]
 
 
 def get_args():
@@ -290,7 +334,28 @@ def compute_metrics(
         metrics["stuff_SQ"] = stuff_sq.item() * 100
         metrics["stuff_RQ"] = stuff_rq.item() * 100
 
-    # F1 metrics (only valid classes)
+        # Per-class PQ breakdown
+        per_class_pq = {}
+        for i in range(len(tp)):
+            rq_i = tp[i] / (tp[i] + 0.5 * fn[i] + 0.5 * fp[i] + eps)
+            sq_i = tp_iou[i] / (tp[i] + eps)
+            per_class_pq[i] = {
+                "PQ": (rq_i * sq_i).item() * 100,
+                "SQ": sq_i.item() * 100,
+                "RQ": rq_i.item() * 100,
+                "TP": int(tp[i].item()),
+                "FP": int(fp[i].item()),
+                "FN": int(fn[i].item()),
+                "ignored": i in ignore_set,
+            }
+        metrics["per_class_PQ"] = per_class_pq
+
+        # Total TP/FP/FN (valid classes only)
+        metrics["total_TP"] = int(tp[valid_all_idxs].sum().item())
+        metrics["total_FP"] = int(fp[valid_all_idxs].sum().item())
+        metrics["total_FN"] = int(fn[valid_all_idxs].sum().item())
+
+    # F1 / semantic segmentation metrics (primitive-length-weighted)
     if f1_states:
         # f1_states are shaped (num_classes+1,) — index by valid class idxs
         tp_per = f1_states["tp_per_class"].float()
@@ -304,9 +369,42 @@ def compute_metrics(
         f1 = 2 * precision * recall / (precision + recall + eps)
         metrics["F1"] = f1.item()
 
+        # Weighted (primitive-length-weighted) tensors for IoU-based metrics
         w_tp_per = f1_states["w_tp_per_class"].float()
         w_pred_per = f1_states["w_pred_per_class"].float()
         w_gt_per = f1_states["w_gt_per_class"].float()
+
+        # Per-class IoU = w_tp / (w_pred + w_gt - w_tp)
+        num_sem_classes = len(w_tp_per) - 1  # last index is background
+        per_class_iou = {}
+        for i in range(num_sem_classes):
+            union = w_pred_per[i] + w_gt_per[i] - w_tp_per[i]
+            per_class_iou[i] = {
+                "IoU": (w_tp_per[i] / (union + eps)).item() * 100,
+                "ignored": i in ignore_set,
+            }
+        metrics["per_class_IoU"] = per_class_iou
+
+        # mIoU over valid classes
+        valid_ious = [per_class_iou[i]["IoU"] for i in valid_all_idxs]
+        metrics["mIoU"] = float(np.mean(valid_ious)) if valid_ious else 0.0
+
+        # fwIoU: frequency-weighted IoU (weight = gt primitives / total gt primitives)
+        total_gt_w = w_gt_per[valid_all_idxs].sum()
+        fw_iou = 0.0
+        if total_gt_w > 0:
+            for i in valid_all_idxs:
+                union = w_pred_per[i] + w_gt_per[i] - w_tp_per[i]
+                iou_i = w_tp_per[i] / (union + eps)
+                fw_iou += (w_gt_per[i] / total_gt_w * iou_i).item()
+        metrics["fwIoU"] = fw_iou * 100
+
+        # Pixel accuracy over valid classes
+        metrics["pACC"] = (
+            w_tp_per[valid_all_idxs].sum() / (w_gt_per[valid_all_idxs].sum() + eps)
+        ).item() * 100
+
+        # Aggregate wF1
         w_tp = w_tp_per[valid_all_idxs].sum()
         w_pred = w_pred_per[valid_all_idxs].sum()
         w_gt = w_gt_per[valid_all_idxs].sum()
@@ -587,93 +685,166 @@ def run_inference(
 def save_results(results: Dict, output_dir: str, args):
     """Save inference results to output directory"""
     os.makedirs(output_dir, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp_file = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # Save metrics to log file
-    log_file = os.path.join(output_dir, f"inference_results_{timestamp}.log")
+    has_gt = results.get("has_gt_data", True)
+    metrics = results["metrics"]
+    timing = results["timing"]
+    skipped = results["skipped_files"]
+    ignore_label = IGNORE_LABEL_MODES[args.ignore_mode]
+    predicted = timing["num_samples"]
+    evaluated = predicted if has_gt else 0
+
+    # ------------------------------------------------------------------ #
+    # Log file                                                             #
+    # ------------------------------------------------------------------ #
+    log_file = os.path.join(output_dir, f"inference_results_{timestamp_file}.log")
     with open(log_file, "w") as f:
-        f.write("=" * 60 + "\n")
-        f.write("VECFORMER INFERENCE RESULTS\n")
-        f.write("=" * 60 + "\n\n")
+        SEP = "=" * 60
+        sep = "-" * 60
 
+        # Header
+        f.write(SEP + "\n")
+        f.write("INFERENCE RESULTS\n")
+        f.write(SEP + "\n\n")
         f.write(f"Timestamp: {timestamp}\n")
         f.write(f"Checkpoint: {args.checkpoint}\n")
         f.write(f"Dataset: {args.datadir}\n")
         f.write(f"Device: {args.device}\n")
         f.write(f"FP16: {args.fp16}\n")
-        f.write(f"Ignore mode: {args.ignore_mode} ({IGNORE_LABEL_MODES[args.ignore_mode]})\n")
-        if results.get("has_gt_data", True):
-            f.write("Ground truth: available\n\n")
-        else:
-            f.write("Ground truth: not available — metrics not computed\n\n")
-
-        f.write("-" * 60 + "\n")
-        f.write("TIMING\n")
-        f.write("-" * 60 + "\n")
-        timing = results["timing"]
-        f.write(f"Total samples: {timing['num_samples']}\n")
-        f.write(f"Total inference time: {timing['total_time']:.2f}s\n")
-        f.write(f"Average time per sample: {timing['avg_time_per_sample']:.4f}s\n")
-        f.write(f"Primitives (min/mean/max/std): {timing['primitives_min']} / {timing['primitives_mean']} / {timing['primitives_max']} / {timing['primitives_std']}\n")
-        if "min_time_per_sample" in timing:
-            f.write(f"Min time per sample: {timing['min_time_per_sample']:.4f}s\n")
-            f.write(f"Max time per sample: {timing['max_time_per_sample']:.4f}s\n")
-            f.write(f"Std time per sample: {timing['std_time_per_sample']:.4f}s\n")
-            f.write(f"VRAM allocated (min/mean/max/std): {timing['vram_allocated_min_mb']:.1f} / {timing['vram_allocated_mean_mb']:.1f} / {timing['vram_allocated_max_mb']:.1f} / {timing['vram_allocated_std_mb']:.1f} MB\n")
-            f.write(f"VRAM reserved  (min/mean/max/std): {timing['vram_reserved_min_mb']:.1f} / {timing['vram_reserved_mean_mb']:.1f} / {timing['vram_reserved_max_mb']:.1f} / {timing['vram_reserved_std_mb']:.1f} MB\n")
-            f.write(f"VRAM physical  (min/mean/max/std): {timing['vram_physical_min_mb']:.1f} / {timing['vram_physical_mean_mb']:.1f} / {timing['vram_physical_max_mb']:.1f} / {timing['vram_physical_std_mb']:.1f} MB\n")
+        f.write(f"Ignore label mode: {args.ignore_mode} ({ignore_label})\n")
+        f.write(f"Total files: {predicted}\n")
+        f.write(f"Predicted files: {predicted}\n")
+        f.write(f"Evaluated files (with GT): {evaluated}\n")
+        f.write(f"Skipped files (OOM): {len(skipped)}\n")
+        if not has_gt:
+            f.write("Ground truth: not available — metrics not computed\n")
         f.write("\n")
 
-        f.write("-" * 60 + "\n")
-        f.write("METRICS\n")
-        f.write("-" * 60 + "\n")
+        # Timing
+        f.write(sep + "\n")
+        f.write("TIMING\n")
+        f.write(sep + "\n")
+        f.write(f"Total inference time: {timing['total_time']:.2f}s\n")
+        f.write(f"Average time per file: {timing['avg_time_per_sample']:.4f}s\n")
+        f.write(
+            f"Primitives (min/mean/max/std): "
+            f"{timing['primitives_min']} / {timing['primitives_mean']} / "
+            f"{timing['primitives_max']} / {timing['primitives_std']}\n"
+        )
+        if "min_time_per_sample" in timing:
+            f.write(f"Min time per file: {timing['min_time_per_sample']:.4f}s\n")
+            f.write(f"Max time per file: {timing['max_time_per_sample']:.4f}s\n")
+            f.write(f"Std time per file: {timing['std_time_per_sample']:.4f}s\n")
+            f.write(
+                f"VRAM allocated (min/mean/max/std): "
+                f"{timing['vram_allocated_min_mb']:.1f} / {timing['vram_allocated_mean_mb']:.1f} / "
+                f"{timing['vram_allocated_max_mb']:.1f} / {timing['vram_allocated_std_mb']:.1f} MB\n"
+            )
+            f.write(
+                f"VRAM reserved  (min/mean/max/std): "
+                f"{timing['vram_reserved_min_mb']:.1f} / {timing['vram_reserved_mean_mb']:.1f} / "
+                f"{timing['vram_reserved_max_mb']:.1f} / {timing['vram_reserved_std_mb']:.1f} MB\n"
+            )
+            f.write(
+                f"VRAM physical  (min/mean/max/std): "
+                f"{timing['vram_physical_min_mb']:.1f} / {timing['vram_physical_mean_mb']:.1f} / "
+                f"{timing['vram_physical_max_mb']:.1f} / {timing['vram_physical_std_mb']:.1f} MB\n"
+            )
+        f.write("\n")
 
-        metrics = results["metrics"]
         if not metrics:
+            f.write(sep + "\n")
+            f.write("METRICS\n")
+            f.write(sep + "\n")
             f.write("\nNo evaluation metrics — ground truth labels not available.\n\n")
         else:
+            # Semantic Segmentation section
+            if "mIoU" in metrics:
+                f.write(sep + "\n")
+                f.write("SEMANTIC SEGMENTATION\n")
+                f.write(sep + "\n")
+                f.write(f"mIoU:  {metrics['mIoU']:.3f}\n")
+                f.write(f"fwIoU: {metrics['fwIoU']:.3f}\n")
+                f.write(f"pACC:  {metrics['pACC']:.3f}\n")
+                f.write("\nPer-class IoU:\n")
+                per_iou = metrics["per_class_IoU"]
+                for i, name in enumerate(CLASS_NAMES[:-1]):  # skip background
+                    if i not in per_iou or per_iou[i]["ignored"]:
+                        continue
+                    f.write(f"  {name:<22}: {per_iou[i]['IoU']:>7.3f}\n")
+                f.write("\n")
+
+            # Panoptic Segmentation section
             if "PQ" in metrics:
-                f.write("\nPanoptic Segmentation:\n")
-                f.write(f"  PQ: {metrics['PQ']:.3f}  |  SQ: {metrics['SQ']:.3f}  |  RQ: {metrics['RQ']:.3f}\n\n")
-
+                f.write(sep + "\n")
+                f.write("PANOPTIC SEGMENTATION\n")
+                f.write(sep + "\n")
+                f.write(
+                    f"PQ: {metrics['PQ']:.3f}  |  RQ: {metrics['RQ']:.3f}  |  SQ: {metrics['SQ']:.3f}\n\n"
+                )
                 f.write("Thing classes:\n")
-                f.write(f"  PQ: {metrics['thing_PQ']:.3f}  |  SQ: {metrics['thing_SQ']:.3f}  |  RQ: {metrics['thing_RQ']:.3f}\n\n")
-
+                f.write(
+                    f"  PQ: {metrics['thing_PQ']:.3f}  |  RQ: {metrics['thing_RQ']:.3f}  |  SQ: {metrics['thing_SQ']:.3f}\n\n"
+                )
                 f.write("Stuff classes:\n")
-                f.write(f"  PQ: {metrics['stuff_PQ']:.3f}  |  SQ: {metrics['stuff_SQ']:.3f}  |  RQ: {metrics['stuff_RQ']:.3f}\n\n")
+                f.write(
+                    f"  PQ: {metrics['stuff_PQ']:.3f}  |  RQ: {metrics['stuff_RQ']:.3f}  |  SQ: {metrics['stuff_SQ']:.3f}\n\n"
+                )
+                f.write("Per-class PQ:\n")
+                per_pq = metrics["per_class_PQ"]
+                for i, name in enumerate(CLASS_NAMES[:-1]):  # skip background
+                    if i not in per_pq or per_pq[i]["ignored"]:
+                        continue
+                    c = per_pq[i]
+                    f.write(
+                        f"  {name:<22}: PQ={c['PQ']:>7.3f}  RQ={c['RQ']:>7.3f}  SQ={c['SQ']:>7.3f}"
+                        f"  (TP={c['TP']}, FP={c['FP']}, FN={c['FN']})\n"
+                    )
+                f.write("\n")
 
-            if "F1" in metrics:
-                f.write("Semantic Segmentation:\n")
-                f.write(f"  F1:  {metrics['F1']:.4f}\n")
-                f.write(f"  wF1: {metrics['wF1']:.4f}\n\n")
+            # Total counts
+            if "total_TP" in metrics:
+                f.write(sep + "\n")
+                f.write("TOTAL COUNTS\n")
+                f.write(sep + "\n")
+                f.write(f"TP: {metrics['total_TP']}\n")
+                f.write(f"FP: {metrics['total_FP']}\n")
+                f.write(f"FN: {metrics['total_FN']}\n\n")
 
-        if results["skipped_files"]:
-            f.write("-" * 60 + "\n")
+        # Skipped files
+        if skipped:
+            f.write(sep + "\n")
             f.write("SKIPPED FILES (OOM)\n")
-            f.write("-" * 60 + "\n")
-            for skipped in results["skipped_files"]:
-                f.write(f"  {skipped}\n")
+            f.write(sep + "\n")
+            for s in skipped:
+                f.write(f"  {s}\n")
 
     logger.info(f"Saved results log to {log_file}")
 
-    # Save metrics as JSON
-    metrics_file = os.path.join(output_dir, f"metrics_{timestamp}.json")
+    # ------------------------------------------------------------------ #
+    # JSON metrics file                                                    #
+    # ------------------------------------------------------------------ #
+    metrics_file = os.path.join(output_dir, f"metrics_{timestamp_file}.json")
     with open(metrics_file, "w") as f:
         json.dump(
             {
                 "metrics": results["metrics"],
                 "timing": results["timing"],
-                "skipped_files": results["skipped_files"],
-                "has_ground_truth": results.get("has_gt_data", True),
+                "skipped_files": skipped,
+                "has_ground_truth": has_gt,
                 "ignore_mode": args.ignore_mode,
-                "ignore_label": IGNORE_LABEL_MODES[args.ignore_mode],
+                "ignore_label": ignore_label,
             },
             f,
             indent=2,
         )
     logger.info(f"Saved metrics JSON to {metrics_file}")
 
-    # Save model_output.npy (SymPointV2-compatible format)
+    # ------------------------------------------------------------------ #
+    # model_output.npy (SymPointV2-compatible)                            #
+    # ------------------------------------------------------------------ #
     if results["save_dicts"]:
         npy_file = os.path.join(output_dir, "model_output.npy")
         np.save(npy_file, results["save_dicts"])
@@ -730,23 +901,26 @@ def main():
         has_gt_data=has_gt_data,
     )
 
-    # Print metrics
-    logger.info("\n" + "=" * 60)
-    logger.info("RESULTS")
-    logger.info("=" * 60)
-
+    # Print summary to console
     metrics = results["metrics"]
-    if "PQ" in metrics:
-        logger.info(f"PQ: {metrics['PQ']:.3f}  |  SQ: {metrics['SQ']:.3f}  |  RQ: {metrics['RQ']:.3f}")
-        logger.info(f"Thing PQ: {metrics['thing_PQ']:.3f}  |  Stuff PQ: {metrics['stuff_PQ']:.3f}")
-
-    if "F1" in metrics:
-        logger.info(f"F1: {metrics['F1']:.4f}  |  wF1: {metrics['wF1']:.4f}")
+    timing = results["timing"]
+    logger.info("\n" + "=" * 60)
+    logger.info("RESULTS SUMMARY")
+    logger.info("=" * 60)
 
     if not metrics:
         logger.info("No evaluation metrics (no ground truth)")
+    else:
+        if "mIoU" in metrics:
+            logger.info(f"mIoU: {metrics['mIoU']:.3f}  |  fwIoU: {metrics['fwIoU']:.3f}  |  pACC: {metrics['pACC']:.3f}")
+        if "PQ" in metrics:
+            logger.info(f"PQ: {metrics['PQ']:.3f}  |  RQ: {metrics['RQ']:.3f}  |  SQ: {metrics['SQ']:.3f}")
+            logger.info(f"  Thing  PQ: {metrics['thing_PQ']:.3f}  |  RQ: {metrics['thing_RQ']:.3f}  |  SQ: {metrics['thing_SQ']:.3f}")
+            logger.info(f"  Stuff  PQ: {metrics['stuff_PQ']:.3f}  |  RQ: {metrics['stuff_RQ']:.3f}  |  SQ: {metrics['stuff_SQ']:.3f}")
+        if "total_TP" in metrics:
+            logger.info(f"  TP: {metrics['total_TP']}  FP: {metrics['total_FP']}  FN: {metrics['total_FN']}")
 
-    logger.info(f"\nInference time: {results['timing']['total_time']:.2f}s ({results['timing']['avg_time_per_sample']:.4f}s/sample)")
+    logger.info(f"Inference time: {timing['total_time']:.2f}s ({timing['avg_time_per_sample']:.4f}s/file)")
     logger.info(f"Predictions saved: {len(results['save_dicts'])}")
 
     if results["skipped_files"]:
