@@ -26,10 +26,11 @@ torchrun \
     --node_rank=$NODE_RANK \
     launch.py \
     --launch_mode continue \
-    --resume_from_checkpoint ${OUTPUT_DIR}/latest/checkpoint-best \
+    --resume_from_checkpoint /content/drive/MyDrive/My_Computer/vecformer_data/cp_98/ \
     --config_path configs/vecformer.yaml \
     --model_args_path configs/model/vecformer_poilabs.yaml \
     --data_args_path configs/data/floorplancad.yaml \
-    --run_name vecformer_poilabs \
+    --run_name ManualVsAuto \
     --save_total_limit 5 \
     --output_dir ${OUTPUT_DIR}/${TIMESTAMP}
+

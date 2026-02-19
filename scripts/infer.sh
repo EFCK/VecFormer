@@ -9,13 +9,14 @@ export PYTHONPATH=$(pwd):$PYTHONPATH
 
 # ==================== Configuration ==================== #
 # Dataset directory (contains train/val/test subdirectories)
-datadir=datasets/ARI3-sampled-as-line-jsons
+datadir=datasets/line_json/ManualVsAuto/train/manual
+
+# Output directory for results
+out=results/ManualVsAuto/train/manual
 
 # Model checkpoint directory (contains model.safetensors)
 checkpoint=configs/cp_98
 
-# Output directory for results
-out=results/ARI3/cp_98/
 
 
 # ======================================================= #
