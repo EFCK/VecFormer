@@ -9,10 +9,10 @@ export PYTHONPATH=$(pwd):$PYTHONPATH
 
 # ==================== Configuration ==================== #
 # Dataset directory (contains train/val/test subdirectories)
-datadir=datasets/line_json/ManualVsAuto/train/manual
+datadir=datasets/line_json/ManualVsAuto/test/manual
 
-# Output directory for results
-out=results/ManualVsAuto/train/manual
+# Output directory for resu""""""""""   lts
+out=results/ManualVsAuto/test/manual
 
 # Model checkpoint directory (contains model.safetensors)
 checkpoint=configs/cp_98
