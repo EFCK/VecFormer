@@ -1,19 +1,19 @@
 # -------------------------- log ------------------------- #
 log_level: info
 log_on_each_node: false
-logging_steps: 50
+logging_steps: 500
 logging_first_step: true
 report_to:
     - tensorboard
     - wandb
 
 # ------------------------- train ------------------------ #
-num_train_epochs: 100
-per_device_train_batch_size: 4
+num_train_epochs: 5
+per_device_train_batch_size: 2
 per_device_eval_batch_size: 1
 optim: adamw_torch_fused
 bf16: false 
-learning_rate: 0.0001
+learning_rate: 0.00005
 lr_scheduler_type: warmup_stable_decay
 warmup_ratio: 0.05
 lr_scheduler_kwargs:
@@ -34,6 +34,6 @@ save_strategy: best
 # ------------------------- data ------------------------- #
 # changed by efck: reduced from 64 to 8 workers to avoid memory pressure and context switching overhead
 # 64 workers causes excessive memory usage and CPU overhead, 4-8 workers is optimal for most systems
-dataloader_num_workers: 8
+dataloader_num_workers: 2
 dataloader_pin_memory: true  # changed by efck: pin memory for faster CPU to GPU data transfer
 dataloader_drop_last: true # TODO!: if false, the eval step will have some strange bugs, wait to fix
