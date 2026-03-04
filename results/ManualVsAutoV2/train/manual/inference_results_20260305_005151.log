@@ -1,0 +1,99 @@
+============================================================
+INFERENCE RESULTS
+============================================================
+
+Timestamp: 2026-03-05 00:51:51
+Checkpoint: configs/cp_98
+Dataset: datasets/line_json/ManualVsAutoV2/train/manual
+Device: cuda
+FP16: False
+Ignore label mode: poilabs ([35, 3, 5, 7, 8, 9, 11, 14, 15, 17, 19, 20, 21, 22, 23])
+Total files: 220
+Predicted files: 220
+Evaluated files (with GT): 220
+Skipped files (OOM): 0
+
+------------------------------------------------------------
+TIMING
+------------------------------------------------------------
+Total inference time: 40.28s
+Average time per file: 0.1831s
+Primitives (min/mean/max/std): 7 / 442.8 / 3226 / 443.7
+Min time per file: 0.0615s
+Max time per file: 1.0731s
+Std time per file: 0.1231s
+VRAM allocated (min/mean/max/std): 220.4 / 234.8 / 496.7 / 28.8 MB
+VRAM reserved  (min/mean/max/std): 230.0 / 248.3 / 536.0 / 34.5 MB
+VRAM physical  (min/mean/max/std): 2573.6 / 2698.7 / 3018.1 / 77.7 MB
+
+------------------------------------------------------------
+SEMANTIC SEGMENTATION
+------------------------------------------------------------
+mIoU:  19.977
+fwIoU: 48.848
+pACC:  54.573
+
+Per-class IoU:
+  single door           :  65.446
+  double door           :  67.664
+  sliding door          :  11.989
+  revolving door        :   0.000
+  window                :  51.277
+  sofa                  :   0.000
+  chair                 :  21.076
+  table                 :   6.520
+  cabinet               :   0.000
+  sink                  :   7.928
+  squat toilet          :   0.367
+  urinal                :   7.527
+  toilet                :  19.560
+  stairs                :  58.156
+  elevator              :  14.486
+  escalator             :   0.000
+  row chairs            :   0.000
+  parking spot          :   0.000
+  wall                  :  57.834
+  curtain wall          :  25.758
+  railing               :   3.921
+
+------------------------------------------------------------
+PANOPTIC SEGMENTATION
+------------------------------------------------------------
+PQ: 74.587  |  RQ: 93.905  |  SQ: 79.428
+
+Thing classes:
+  PQ: 77.939  |  RQ: 91.383  |  SQ: 85.289
+
+Stuff classes:
+  PQ: 70.498  |  RQ: 96.981  |  SQ: 72.693
+
+Per-class PQ:
+  single door           : PQ= 88.299  RQ= 96.047  SQ= 91.933  (TP=3900, FP=18, FN=303)
+  double door           : PQ= 77.524  RQ= 89.651  SQ= 86.474  (TP=1490, FP=299, FN=45)
+  sliding door          : PQ=  1.593  RQ=  2.857  SQ= 55.761  (TP=1, FP=57, FN=11)
+  revolving door        : PQ=  0.000  RQ=  0.000  SQ=  0.000  (TP=0, FP=0, FN=0)
+  window                : PQ= 81.938  RQ= 95.805  SQ= 85.527  (TP=2215, FP=3, FN=191)
+  sofa                  : PQ=  0.000  RQ=  0.000  SQ=  0.000  (TP=0, FP=0, FN=0)
+  chair                 : PQ= 57.292  RQ= 67.319  SQ= 85.106  (TP=172, FP=33, FN=134)
+  table                 : PQ= 27.487  RQ= 37.975  SQ= 72.383  (TP=15, FP=0, FN=49)
+  cabinet               : PQ=  0.000  RQ=  0.000  SQ=  0.000  (TP=0, FP=0, FN=2)
+  sink                  : PQ=  0.000  RQ=  0.000  SQ=  0.000  (TP=0, FP=167, FN=25)
+  squat toilet          : PQ=  0.000  RQ=  0.000  SQ=  0.000  (TP=0, FP=222, FN=5)
+  urinal                : PQ= 45.534  RQ= 53.448  SQ= 85.193  (TP=31, FP=0, FN=54)
+  toilet                : PQ= 71.332  RQ= 83.590  SQ= 85.336  (TP=163, FP=0, FN=64)
+  stairs                : PQ= 69.208  RQ= 97.404  SQ= 71.052  (TP=1895, FP=72, FN=29)
+  elevator              : PQ= 39.304  RQ= 60.123  SQ= 65.374  (TP=49, FP=25, FN=40)
+  escalator             : PQ=  0.000  RQ=  0.000  SQ=  0.000  (TP=0, FP=0, FN=25)
+  row chairs            : PQ=  0.000  RQ=  0.000  SQ=  0.000  (TP=0, FP=9, FN=2)
+  parking spot          : PQ=  0.000  RQ=  0.000  SQ=  0.000  (TP=0, FP=57, FN=8)
+  wall                  : PQ= 70.777  RQ= 98.032  SQ= 72.199  (TP=7894, FP=218, FN=99)
+  curtain wall          : PQ= 75.060  RQ= 96.671  SQ= 77.645  (TP=726, FP=0, FN=50)
+  railing               : PQ= 26.733  RQ= 30.657  SQ= 87.200  (TP=21, FP=1, FN=94)
+
+------------------------------------------------------------
+TOTAL COUNTS
+------------------------------------------------------------
+TP: 18572
+FP: 1181
+FN: 1230
+
