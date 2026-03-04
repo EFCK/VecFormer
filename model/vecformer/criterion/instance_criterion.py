@@ -205,7 +205,8 @@ class InstanceCriterion(nn.Module):
                  topk_matches: int = 1,
                  iter_matcher: bool = True,
                  use_mean_batch_loss: bool = True,
-                 label_smoothing: float = 0.1):
+                 label_smoothing: float = 0.1,
+                 bce_label_smoothing: float = 0.0):  # changed by efck: 2026-03-04: add BCE label smoothing for ambiguous instance boundaries (e.g. stairs/elevators near walls)
         super().__init__()
         self.class_loss_weight = class_loss_weight
         self.ce_non_object_weight = ce_non_object_weight
@@ -216,6 +217,7 @@ class InstanceCriterion(nn.Module):
         self.iter_matcher = iter_matcher
         self.use_mean_batch_loss = use_mean_batch_loss
         self.label_smoothing = label_smoothing
+        self.bce_label_smoothing = bce_label_smoothing  # changed by efck: 2026-03-04
 
         self.matcher = SparseMatcher(
             topk=topk_matches,
@@ -398,8 +400,9 @@ class InstanceCriterion(nn.Module):
         return ce_weight
 
     def _get_bce_loss(self, preds, targets):
-        loss = F.binary_cross_entropy_with_logits(preds,
-                                                  targets.float())
+        # changed by efck: 2026-03-04: apply bce_label_smoothing; maps 0->α/2, 1->1-α/2
+        targets_smooth = targets.float() * (1 - self.bce_label_smoothing) + self.bce_label_smoothing * 0.5
+        loss = F.binary_cross_entropy_with_logits(preds, targets_smooth)
         return loss
 
     def _get_dice_loss(self, preds, targets):

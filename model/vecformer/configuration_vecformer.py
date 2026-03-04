@@ -87,6 +87,7 @@ class VecFormerConfig(PretrainedConfig):
             "topk_matches": 1,
             "iter_matcher": True,
             "label_smoothing": 0.1,
+            "bce_label_smoothing": 0.0,  # changed by efck: 2026-03-04: soft BCE targets for ambiguous instance boundaries
             "use_mean_batch_loss": True,
         },  # instance loss config
         semantic_criterion_config: dict = {
