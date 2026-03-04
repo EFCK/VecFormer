@@ -231,7 +231,7 @@ def json_path_to_svg_path(json_path: str) -> str:
     The JSON and SVG datasets mirror each other's directory structure,
     with only the extension differing (.json vs .svg).
     """
-    return json_path.replace(".json", ".svg")
+    return json_path.replace("/line_json/", "/svg/").replace(".json", ".svg")
 
 
 def has_ground_truth(json_path: str) -> bool:
