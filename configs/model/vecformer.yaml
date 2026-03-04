@@ -1,2 +1,7 @@
 model_name: vecformer
-model_args: {} # use default args
+model_args:
+  semantic_criterion_config:
+    ce_loss_weight: 5.0
+    ce_unlabeled_weight: 0.1
+    label_smoothing: 0.1
+    use_mean_batch_loss: true
