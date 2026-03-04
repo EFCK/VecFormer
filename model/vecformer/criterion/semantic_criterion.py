@@ -71,7 +71,7 @@ class SemanticCriterion(nn.Module):
     def _get_loss(self, pred_labels, target_labels):
         loss = []
         for pred_label, target_label in zip(pred_labels, target_labels):
-            loss.append(F.cross_entropy(pred_label, target_label.long(), label_smoothing=self.label_smoothing))
+            loss.append(F.cross_entropy(pred_label, target_label.long()))
         loss = torch.stack(loss).mean() if self.use_mean_batch_loss else torch.stack(loss).sum()
         return dict(ce_loss=self.ce_loss_weight * loss)
 
