@@ -32,6 +32,11 @@ import numpy as np
 import torch
 import tqdm
 
+# Deterministic inference
+torch.manual_seed(42)
+torch.cuda.manual_seed_all(42)
+torch.backends.cudnn.benchmark = False
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,

@@ -6,6 +6,7 @@
 # Modify these values before running inference.
 
 export PYTHONPATH=$(pwd):$PYTHONPATH
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 # ==================== Configuration ==================== #
 # Dataset directory (contains train/val/test subdirectories)

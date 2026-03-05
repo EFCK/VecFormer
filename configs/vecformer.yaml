@@ -31,9 +31,13 @@ eval_on_start: true
 metric_for_best_model: PQ
 save_strategy: best
 
+# ---------------------- determinism --------------------- #
+seed: 42
+
 # ------------------------- data ------------------------- #
 # changed by efck: reduced from 64 to 8 workers to avoid memory pressure and context switching overhead
 # 64 workers causes excessive memory usage and CPU overhead, 4-8 workers is optimal for most systems
 dataloader_num_workers: 2
 dataloader_pin_memory: true  # changed by efck: pin memory for faster CPU to GPU data transfer
 dataloader_drop_last: true # TODO!: if false, the eval step will have some strange bugs, wait to fix
+

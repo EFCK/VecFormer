@@ -1,5 +1,5 @@
 import torch
-from torch_scatter import scatter
+from utils.scatter import scatter
 
 from .dataclass_define import (
     SVGData,

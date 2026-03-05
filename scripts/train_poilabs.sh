@@ -21,6 +21,7 @@ export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
 export MASTER_PORT=${MASTER_PORT:-11451}
 
 export OMP_NUM_THREADS=$NPROC_PER_NODE
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
 torchrun \
     --master_addr=$MASTER_ADDR \
     --master_port=$MASTER_PORT \

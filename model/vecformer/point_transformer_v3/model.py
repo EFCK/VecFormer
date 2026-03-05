@@ -17,7 +17,7 @@ import math
 import torch
 import torch.nn as nn
 import spconv.pytorch as spconv
-import torch_scatter
+from utils.scatter import scatter
 from timm.layers.drop import DropPath
 from collections import OrderedDict
 
@@ -88,7 +88,7 @@ class Point(Dict):
         elif "offset" not in self.keys() and "batch" in self.keys():
             self["offset"] = batch2offset(self.batch)
 
-    def serialization(self, order="z", depth=None, shuffle_orders=False):
+    def serialization(self, order="z", depth=None, shuffle_orders=False, eval_mode=False):
         """
         Point Cloud Serialization
 
@@ -135,7 +135,7 @@ class Point(Dict):
             ),
         )
 
-        if shuffle_orders:
+        if shuffle_orders and not eval_mode:
             perm = torch.randperm(code.shape[0])
             code = code[perm]
             order = order[perm]
@@ -666,9 +666,9 @@ class SerializedPooling(PointModule):
             return_inverse=True,
             return_counts=True,
         )
-        # indices of point sorted by cluster, for torch_scatter.segment_csr
+        # indices of point sorted by cluster, for scatter-based segment reduce
         _, indices = torch.sort(cluster)
-        # index pointer for sorted point, for torch_scatter.segment_csr
+        # index pointer for sorted point
         idx_ptr = torch.cat([counts.new_zeros(1), torch.cumsum(counts, dim=0)])
         # head_indices of each cluster, for reduce attr e.g. code, batch
         head_indices = indices[idx_ptr[:-1]]
@@ -683,19 +683,26 @@ class SerializedPooling(PointModule):
             ),
         )
 
-        if self.shuffle_orders:
+        if self.shuffle_orders and self.training:
             perm = torch.randperm(code.shape[0])
             code = code[perm]
             order = order[perm]
             inverse = inverse[perm]
 
+        # Deterministic scatter-based pooling (replaces torch_scatter.segment_csr)
+        # Build segment_ids from counts: each element gets its segment index
+        segment_ids = torch.arange(len(counts), device=indices.device).repeat_interleave(counts)
+        num_segments = len(counts)
+
         # collect information
         point_dict = Dict(
-            feat=torch_scatter.segment_csr(
-                self.proj(point.feat)[indices], idx_ptr, reduce=self.reduce
+            feat=scatter(
+                self.proj(point.feat)[indices], segment_ids, dim=0,
+                dim_size=num_segments, reduce=self.reduce
             ),
-            coord=torch_scatter.segment_csr(
-                point.coord[indices], idx_ptr, reduce="mean"
+            coord=scatter(
+                point.coord[indices], segment_ids, dim=0,
+                dim_size=num_segments, reduce="mean"
             ),
             grid_coord=point.grid_coord[head_indices] >> pooling_depth,
             serialized_code=code,
@@ -982,7 +989,7 @@ class PointTransformerV3(PointModule):
         3. "offset" or "batch": https://github.com/Pointcept/Pointcept?tab=readme-ov-file#offset
         """
         point = Point(data_dict)
-        point.serialization(order=self.order, shuffle_orders=self.shuffle_orders)
+        point.serialization(order=self.order, shuffle_orders=self.shuffle_orders, eval_mode=not self.training)
         point.sparsify()
 
         point = self.embedding(point)

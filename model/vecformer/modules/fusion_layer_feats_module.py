@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_scatter import scatter
+from utils.scatter import scatter
 
 
 class FusionLayerFeatsModule(nn.Module):

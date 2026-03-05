@@ -8,6 +8,11 @@ from utils import apply_patches
 
 apply_patches()
 
+# ----------- deterministic training settings ----------- #
+import torch
+
+torch.backends.cudnn.benchmark = False
+
 # -------------- import installed modules ------------- #
 from transformers import TrainingArguments
 from transformers.utils.logging import (
