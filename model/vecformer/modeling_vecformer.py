@@ -9,7 +9,7 @@ VecFormer model
 from dataclasses import dataclass
 
 import torch
-from utils.scatter import scatter
+from torch_scatter import scatter
 
 from transformers import PreTrainedModel
 from transformers.utils import ModelOutput, logging

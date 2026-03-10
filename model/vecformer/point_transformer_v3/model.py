@@ -17,7 +17,7 @@ import math
 import torch
 import torch.nn as nn
 import spconv.pytorch as spconv
-from utils.scatter import scatter
+from torch_scatter import scatter, segment_csr
 from timm.layers.drop import DropPath
 from collections import OrderedDict
 
@@ -689,20 +689,13 @@ class SerializedPooling(PointModule):
             order = order[perm]
             inverse = inverse[perm]
 
-        # Deterministic scatter-based pooling (replaces torch_scatter.segment_csr)
-        # Build segment_ids from counts: each element gets its segment index
-        segment_ids = torch.arange(len(counts), device=indices.device).repeat_interleave(counts)
-        num_segments = len(counts)
-
         # collect information
         point_dict = Dict(
-            feat=scatter(
-                self.proj(point.feat)[indices], segment_ids, dim=0,
-                dim_size=num_segments, reduce=self.reduce
+            feat=segment_csr(
+                self.proj(point.feat)[indices], idx_ptr, reduce=self.reduce
             ),
-            coord=scatter(
-                point.coord[indices], segment_ids, dim=0,
-                dim_size=num_segments, reduce="mean"
+            coord=segment_csr(
+                point.coord[indices], idx_ptr, reduce="mean"
             ),
             grid_coord=point.grid_coord[head_indices] >> pooling_depth,
             serialized_code=code,

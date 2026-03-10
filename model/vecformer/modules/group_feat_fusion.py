@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from utils.scatter import scatter
+from torch_scatter import scatter
 
 from .addnorm import AddNorm
 
