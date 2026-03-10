@@ -9,10 +9,10 @@ report_to:
 
 # ------------------------- train ------------------------ #
 num_train_epochs: 5
-per_device_train_batch_size: 2
+per_device_train_batch_size: 1
 per_device_eval_batch_size: 1
 optim: adamw_torch_fused
-bf16: false 
+bf16: false
 learning_rate: 0.00005
 lr_scheduler_type: warmup_stable_decay
 warmup_ratio: 0.05
@@ -35,9 +35,7 @@ save_strategy: best
 seed: 42
 
 # ------------------------- data ------------------------- #
-# changed by efck (2026-03-10): increased from 2 to 8 after switching to .pt loader (torch.load is far lighter than json.load + to_tensor)
-# with JSON loading 2 was the ceiling; with .pt loading 8 workers is safe without memory pressure
-dataloader_num_workers: 8
+dataloader_num_workers: 4
 dataloader_pin_memory: true  # changed by efck: pin memory for faster CPU to GPU data transfer
 dataloader_drop_last: true # TODO!: if false, the eval step will have some strange bugs, wait to fix
 

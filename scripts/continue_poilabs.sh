@@ -9,7 +9,7 @@
 export PYTHONPATH=$(pwd):$PYTHONPATH
 
 export TIMESTAMP=${TIMESTAMP:-$(date +"%Y%m%d_%H%M%S")}
-export OUTPUT_DIR=${OUTPUT_DIR:-"outputs/poilabs"}
+export OUTPUT_DIR=${OUTPUT_DIR:-"/content/drive/MyDrive/My_Computer/vecformer_data/workdir"}
 
 export NODE_RANK=${NODE_RANK:-0}
 export NNODES=${NNODES:-1}
@@ -31,7 +31,7 @@ torchrun \
     --config_path configs/vecformer.yaml \
     --model_args_path configs/model/vecformer_poilabs.yaml \
     --data_args_path configs/data/floorplancad.yaml \
-    --run_name ManualVsAuto \
+    --run_name finetuneV2_smoothing0 \
     --save_total_limit 5 \
-    --output_dir ${OUTPUT_DIR}/${TIMESTAMP}
+    --output_dir ${OUTPUT_DIR}/finetuneV2_smoothing0/${TIMESTAMP}
 
