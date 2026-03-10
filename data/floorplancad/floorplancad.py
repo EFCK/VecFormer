@@ -8,6 +8,7 @@ from torch.utils.data import Dataset
 from utils.svg_util import scan_dir
 from .dataclass_define import (
     SVGData,
+    SVGDataTensor,
     VecData,
     VecDataTransformArgs
 )
@@ -23,7 +24,8 @@ class FloorPlanCAD(Dataset):
 
     def __init__(self, root_dir: str, split: Optional[str] = None,
                  train_transform_args: Optional[Dict[str, Any]] = None,
-                 eval_transform_args: Optional[Dict[str, Any]] = None):
+                 eval_transform_args: Optional[Dict[str, Any]] = None,
+                 pt_dir: Optional[str] = None):
         self.root_dir = root_dir
         self.split = split
         self.train_transform_args = train_transform_args or {}
@@ -32,22 +34,35 @@ class FloorPlanCAD(Dataset):
             self.data_dir = os.path.join(root_dir, split)
         else:
             self.data_dir = root_dir
-        self.data_paths = scan_dir(self.data_dir, suffix=".json")
+        # changed by efck (2026-03-10): fast path via pre-tensorized .pt files; avoids json.load() + to_tensor() per sample
+        if pt_dir is not None:
+            self.pt_data_dir = os.path.join(pt_dir, split) if split else pt_dir
+            self.data_paths = scan_dir(self.pt_data_dir, suffix=".pt")
+        else:
+            self.pt_data_dir = None
+            self.data_paths = scan_dir(self.data_dir, suffix=".json")
 
     def __len__(self):
         return len(self.data_paths)
 
     def __getitem__(self, idx):
-        # ------------- load origin json data ------------ #
-        data_path = os.path.join(self.data_dir, self.data_paths[idx])
-        json_data = json.load(open(data_path, "r"))
-        # ------ dict to data class for easy access ------ #
-        svg_data = SVGData(**json_data)
-        # -------- transform to line data (tensor) ------- #
         transform_args = self._get_transform_args()
-        vec_data = self._transform(svg_data,
-                                   VecDataTransformArgs(**transform_args))
-        vec_data.data_path = data_path
+        if self.pt_data_dir is not None:
+            # ------------ fast path: load pre-tensorized .pt ------------ #
+            pt_path = os.path.join(self.pt_data_dir, self.data_paths[idx])
+            data = torch.load(pt_path, weights_only=True)
+            svg_data_tensor = SVGDataTensor(**data)
+            vec_data = self._transform_tensor(svg_data_tensor,
+                                              VecDataTransformArgs(**transform_args))
+            vec_data.data_path = pt_path
+        else:
+            # ------------- slow path: load and parse JSON ------------- #
+            data_path = os.path.join(self.data_dir, self.data_paths[idx])
+            json_data = json.load(open(data_path, "r"))
+            svg_data = SVGData(**json_data)
+            vec_data = self._transform(svg_data,
+                                       VecDataTransformArgs(**transform_args))
+            vec_data.data_path = data_path
         return vec_data
 
     def _get_transform_args(self) -> Dict[str, Any]:
@@ -59,8 +74,11 @@ class FloorPlanCAD(Dataset):
             raise ValueError(f"Invalid split: {self.split}")
 
     def _transform(self, data: SVGData, transform_args: VecDataTransformArgs) -> VecData:
-        # -------------- transform to tensor ------------- #
         svg_data_tensor = to_tensor(data)
+        return self._transform_tensor(svg_data_tensor, transform_args)
+
+    def _transform_tensor(self, svg_data_tensor: SVGDataTensor,
+                          transform_args: VecDataTransformArgs) -> VecData:
         # transform all line coords from [N * [x1, y1, x2, y2]] to [N * 2 * [x, y]] for easier processing
         if svg_data_tensor.coords.shape[-1] == 4:
             svg_data_tensor.coords = svg_data_tensor.coords.reshape(-1, 2, 2)

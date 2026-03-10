@@ -35,9 +35,9 @@ save_strategy: best
 seed: 42
 
 # ------------------------- data ------------------------- #
-# changed by efck: reduced from 64 to 8 workers to avoid memory pressure and context switching overhead
-# 64 workers causes excessive memory usage and CPU overhead, 4-8 workers is optimal for most systems
-dataloader_num_workers: 2
+# changed by efck (2026-03-10): increased from 2 to 8 after switching to .pt loader (torch.load is far lighter than json.load + to_tensor)
+# with JSON loading 2 was the ceiling; with .pt loading 8 workers is safe without memory pressure
+dataloader_num_workers: 8
 dataloader_pin_memory: true  # changed by efck: pin memory for faster CPU to GPU data transfer
 dataloader_drop_last: true # TODO!: if false, the eval step will have some strange bugs, wait to fix
 

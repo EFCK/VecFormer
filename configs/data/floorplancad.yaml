@@ -1,6 +1,7 @@
 dataset_name: floorplancad
 dataset_args:
     root_dir: /temp/datasets/line_json/FloorPlanCAD  # preprocess.py --output_dir /temp/datasets --input_dir FloorPlanCAD --connect_lines
+    pt_dir: null  # changed by efck (2026-03-10): set to pre-tensorized .pt directory to skip JSON parsing (e.g. /temp/datasets/line_pt/FloorPlanCAD)
     train_transform_args:
         random_vertical_flip: 0.5
         random_horizontal_flip: 0.5
