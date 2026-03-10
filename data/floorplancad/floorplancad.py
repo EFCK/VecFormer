@@ -29,7 +29,14 @@ class FloorPlanCAD(Dataset):
     # Samples with fewer primitives than this are skipped in collate_fn.
     # A floor plan this small produces no meaningful gradients and would crash
     # SparseMatcher (topk+1=2 > n_queries) even after augmentation.
-    MIN_PRIMITIVES = 10
+    #
+    # changed by efck: raised from 10 → 32.
+    # Why 32: the backbone has 4 SerializedPooling stages at stride=2, giving a
+    # worst-case spatial compression of 2^4 = 16x.  To guarantee that at least
+    # 2 voxels survive the deepest stage (required by nn.BatchNorm1d which needs
+    # N > 1), we need N_start >= 2 * 16 = 32.  The earlier threshold of 10 still
+    # allowed N=1 after pooling (10 / 16 < 1).
+    MIN_PRIMITIVES = 32
 
     def __init__(self, root_dir: str, split: Optional[str] = None,
                  train_transform_args: Optional[Dict[str, Any]] = None,
