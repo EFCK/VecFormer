@@ -1,8 +1,11 @@
+import logging
 from typing import Dict, Optional
 
 import torch
 import torch.distributed as dist
 from transformers import Trainer, TrainerCallback
+
+logger = logging.getLogger(__name__)
 
 from .configuration_vecformer import VecFormerConfig
 from .evaluator import MetricsComputer, MetricsComputerConfig
@@ -174,6 +177,27 @@ class VecFormerTrainer(Trainer):
                     self.custom_logs_accumulated_step[key] = 1
         # ------------------------------------------------ #
         return (loss, outputs) if return_outputs else loss
+
+    def training_step(self, model, inputs, num_items_in_batch=None):
+        try:
+            return super().training_step(model, inputs, num_items_in_batch)
+        except RuntimeError as e:
+            if "CUDA out of memory" not in str(e):
+                raise
+            torch.cuda.empty_cache()
+            # Zero out any partial gradients so the optimizer step is a no-op
+            for p in model.parameters():
+                if p.grad is not None:
+                    p.grad = None
+            data_paths = inputs.get("data_paths", [])
+            logger.warning(
+                f"[OOM] Skipped training batch (step {self.state.global_step}). "
+                f"Files: {data_paths}"
+            )
+            # Return a zero loss so the Trainer's gradient scaler / optimizer step
+            # proceeds without crashing.  Gradients are already cleared above.
+            device = next(model.parameters()).device
+            return torch.tensor(0.0, device=device, requires_grad=False)
 
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
         # hack to handle `nested_detach` stuck in huggingface trainer
