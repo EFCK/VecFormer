@@ -614,6 +614,7 @@ def run_inference(
                     data_paths = batch.get("data_paths", [f"sample_{batch_idx}"])
                     skipped_files.extend(data_paths)
                     logger.warning(f"[OOM] Skipped batch {batch_idx}")
+                    print(f"Warning: Skipped batch {batch_idx} due to OOM. Data paths: {data_paths}")
                     continue
                 else:
                     raise e

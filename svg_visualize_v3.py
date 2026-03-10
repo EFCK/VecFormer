@@ -163,14 +163,47 @@ def visualSVG_with_ids(parsing_list, sem_labels, ins_labels, out_path, ignore_la
     if ignore_labels is None:
         ignore_labels = []
 
+    # Get valid primitives (length >= 1e-10) like in parsing
+    # We need to compute lengths to know which primitives were actually fed to the model
+    # Model drops primitives with length < 1e-10
+    
+    valid_parsing_list = []
     ind = 0
     for line in parsing_list:
         tag = line["tag"].split("svg}")[-1]
         assert tag in ['svg', 'g', 'path', 'circle', 'ellipse', 'text'], tag+" is error!!"
 
         if tag in ["path", "circle", "ellipse"]:
+            # Check if this primitive is valid (length >= 1e-10)
+            is_valid = True
+            if "d" in line:
+                try:
+                    path_repre = parse_path(line['d'])
+                    if path_repre.length() < 1e-10:
+                        is_valid = False
+                except Exception:
+                    pass
+            elif "r" in line:  # circle
+                try:
+                    if 2 * math.pi * float(line['r']) < 1e-10:
+                        is_valid = False
+                except (ValueError, KeyError):
+                    pass
+            if not is_valid:
+                continue
+
             # Get model predictions
-            sem_label = sem_labels[ind]
+            try:
+                sem_label = sem_labels[ind]
+            except IndexError:
+                print(f"\nERROR: out of bounds in {out_path}")
+                print(f"tag: {tag}")
+                print(f"ind: {ind}, len(sem_labels): {len(sem_labels)}, count svg tags: {len(parsing_list)}")
+                # count how many drawable primitives
+                prims = sum(1 for p in parsing_list if p["tag"].split("svg}")[-1] in ["path", "circle", "ellipse"])
+                print(f"Drawable primitives in parsed SVG: {prims}")
+                print(f"sem_labels shape: {sem_labels.shape}")
+                raise
             ins_label = ins_labels[ind]
 
             # Update semantic and instance IDs in SVG attributes
@@ -201,7 +234,9 @@ def visualSVG_with_ids(parsing_list, sem_labels, ins_labels, out_path, ignore_la
             if cvt_color:
                 line["style"] = "background-color: #255255255;"
 
-    svg_writer(parsing_list, out_path)
+        valid_parsing_list.append(line)
+
+    svg_writer(valid_parsing_list, out_path)
     return out_path
 
 
@@ -300,56 +335,54 @@ def get_path(svg_lists):
     for line in svg_lists:
 
         if "d" in line.keys():
+            path_repre = parse_path(line['d'])
+            # Skip zero-length paths — model preprocessor drops these (prim_length < 1e-10)
+            try:
+                path_length = path_repre.length()
+            except (RuntimeError, ValueError):
+                path_length = 0.0
+            if path_length < 1e-10:
+                continue
+
             widths.append(line["stroke-width"])
             gid = int(line["gid"]) if "gid" in line.keys() else -1
             gids.append(gid)
-            path_repre = parse_path(line['d'])
             inds = [0, 1/3, 2/3, 1.0]
             arg = []
-
-            # Handle degenerate paths (zero-length) by checking path length first
             try:
-                path_length = path_repre.length()
-                if path_length < 1e-10:
-                    # Degenerate path - use start point for all samples
-                    start_point = path_repre[0].start
-                    for _ in inds:
-                        arg.extend([start_point.real, start_point.imag])
-                else:
-                    # Normal path - sample points
-                    for ind in inds:
-                        point = path_repre.point(ind)
-                        arg.extend([point.real, point.imag])
-            except (RuntimeError, ValueError) as e:
-                # If point sampling fails, use the start point
+                for ind in inds:
+                    point = path_repre.point(ind)
+                    arg.extend([point.real, point.imag])
+            except (RuntimeError, ValueError):
                 try:
                     start_point = path_repre[0].start
                     for _ in inds:
                         arg.extend([start_point.real, start_point.imag])
                 except (AttributeError, IndexError):
-                    # Last resort: use origin
                     for _ in inds:
                         arg.extend([0.0, 0.0])
 
             args.append(arg)
-            length = path_repre.length()
-            lengths.append(length)
+            lengths.append(path_length)
             path_type = path_repre[0].__class__.__name__
             types.append(COMMANDS.index(path_type))
         elif "r" in line.keys():
+            r = float(line['r'])
+            circle_len = 2 * math.pi * r
+            # Skip zero-radius circles — model preprocessor drops these
+            if circle_len < 1e-10:
+                continue
             widths.append(line["stroke-width"])
             gid = int(line["gid"]) if "gid" in line.keys() else -1
             gids.append(gid)
             cx = float(line['cx'])
             cy = float(line['cy'])
-            r = float(line['r'])
             arg = []
-            thetas = [0,math.pi/2, math.pi, 3 * math.pi/2,]
+            thetas = [0, math.pi/2, math.pi, 3 * math.pi/2]
             for theta in thetas:
                 x, y = cx + r * math.cos(theta), cy + r * math.sin(theta)
-                arg.extend([x,y])
+                arg.extend([x, y])
             args.append(arg)
-            circle_len = 2 * math.pi * r
             lengths.append(circle_len)
             types.append(COMMANDS.index("circle"))
     return widths, gids, args, lengths, types

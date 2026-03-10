@@ -10,10 +10,10 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 # ==================== Configuration ==================== #
 # Dataset directory (contains train/val/test subdirectories)
-datadir=datasets/line_json/ManualVsAutoV2/train/auto
+datadir=datasets/line_json/AB2
 
 # Output directory for resu""""""""""   lts
-out=results/ManualVsAutoV2/train/auto
+out=results/AB2
 
 # Model checkpoint directory (contains model.safetensors)
 checkpoint=configs/cp_98
