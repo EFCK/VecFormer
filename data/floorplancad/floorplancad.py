@@ -1,9 +1,13 @@
+# changed by efck: added logging + MIN_PRIMITIVES filter for degenerate samples
+import logging
 import os
 import json
 from typing import Dict, Any, Optional
 
 import torch
 from torch.utils.data import Dataset
+
+logger = logging.getLogger(__name__)
 
 from utils.svg_util import scan_dir
 from .dataclass_define import (
@@ -21,6 +25,11 @@ from .transform_utils import (
 
 
 class FloorPlanCAD(Dataset):
+
+    # Samples with fewer primitives than this are skipped in collate_fn.
+    # A floor plan this small produces no meaningful gradients and would crash
+    # SparseMatcher (topk+1=2 > n_queries) even after augmentation.
+    MIN_PRIMITIVES = 10
 
     def __init__(self, root_dir: str, split: Optional[str] = None,
                  train_transform_args: Optional[Dict[str, Any]] = None,
@@ -134,6 +143,22 @@ class FloorPlanCAD(Dataset):
         """
         if not batch:
             raise ValueError("Batch cannot be empty")
+
+        # changed by efck: filter out degenerate samples with too few primitives. These produce
+        # no meaningful gradients and can crash SparseMatcher (topk out of range).
+        valid_batch = [item for item in batch if len(item.coords) >= FloorPlanCAD.MIN_PRIMITIVES]
+        if len(valid_batch) < len(batch):
+            skipped_paths = [item.data_path for item in batch if len(item.coords) < FloorPlanCAD.MIN_PRIMITIVES]
+            logger.warning(
+                f"collate_fn: filtered {len(batch) - len(valid_batch)} degenerate sample(s) "
+                f"with <{FloorPlanCAD.MIN_PRIMITIVES} primitives: {skipped_paths}"
+            )
+        if not valid_batch:
+            raise ValueError(
+                f"All {len(batch)} samples in batch were filtered out "
+                f"(<{FloorPlanCAD.MIN_PRIMITIVES} primitives each)"
+            )
+        batch = valid_batch
 
         # Define fields to extract and pad
         fields = ['coords', 'feats', 'prim_ids', 'layer_ids', 'sem_ids', 'inst_ids', 'prim_lengths']

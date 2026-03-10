@@ -1,9 +1,13 @@
+# changed by efck: added logging for degenerate-sample warnings
+import logging
 from typing import List
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
+
+logger = logging.getLogger(__name__)
 
 
 class SparseMatcher:
@@ -66,7 +70,21 @@ class SparseMatcher:
             costs_cloned = costs.clone()
             # Get sparse match
             costs = torch.where(target_masks[:, target_selected_idxs].T, costs, self.inf)
-            values = torch.topk(costs, self.topk + 1, dim=0, sorted=True, largest=False).values[-1:, :]
+            # changed by efck: guard against n_queries < topk+1 (degenerate samples crash topk)
+            k = min(self.topk + 1, costs.shape[0])
+            if k == 0:
+                logger.warning(
+                    f"SparseMatcher: n_queries=0 for a batch element with n_targets={costs.shape[1]}; "
+                    f"skipping matching (degenerate sample"
+                )
+                list_match_indices.append(torch.zeros(2, 0, dtype=torch.long, device=costs.device))
+                continue
+            if k < self.topk + 1:
+                logger.warning(
+                    f"SparseMatcher: n_queries={costs.shape[0]} < topk+1={self.topk + 1}; "
+                    f"clamping k to {k} and falling back to Hungarian (degenerate sample)"
+                )
+            values = torch.topk(costs, k, dim=0, sorted=True, largest=False).values[-1:, :]
             ids = torch.argwhere(costs < values)
             if ids.numel() == 0:
                 # if no match, use hungarian algorithm to find the best match
