@@ -120,6 +120,9 @@ def init_wandb(training_args, model, dataset_splits):
         reinit=True,
     )
 
+    wandb.define_metric("epoch")
+    wandb.define_metric("eval/*", step_metric="epoch")
+
     logger.info("Wandb initialized successfully")
 
 
