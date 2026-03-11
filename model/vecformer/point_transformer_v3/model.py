@@ -249,7 +249,24 @@ class PointSequential(PointModule):
             # PyTorch module
             else:
                 if isinstance(input, Point):
-                    input.feat = module(input.feat)
+                    # changed by efck: guard BatchNorm N=1 crash.
+                    # nn.BatchNorm1d requires N>1 in train mode. When spatial
+                    # pooling collapses all primitives to a single voxel,
+                    # temporarily switch norm to eval mode (uses running stats).
+                    if (
+                        self.training
+                        and isinstance(module, nn.modules.batchnorm._BatchNorm)
+                        and input.feat.shape[0] <= 1
+                    ):
+                        was_training = module.training
+                        module.eval()
+                        try:
+                            input.feat = module(input.feat)
+                        finally:
+                            if was_training:
+                                module.train()
+                    else:
+                        input.feat = module(input.feat)
                     if "sparse_conv_feat" in input.keys():
                         input.sparse_conv_feat = input.sparse_conv_feat.replace_feature(
                             input.feat
@@ -715,21 +732,7 @@ class SerializedPooling(PointModule):
             point_dict["pooling_parent"] = point
         point = Point(point_dict)
         if self.norm is not None:
-            if self.training and point.feat.shape[0] == 1:
-                # changed by efck: eval-mode guard — N=1 after pooling crashes BatchNorm.
-                # N=1 after pooling: nn.BatchNorm1d requires N > 1 in train mode.
-                # Switch to eval mode so it uses running_mean/running_var instead
-                # of batch statistics — BN still executes and gradients still flow
-                # through γ and β.  Running stats are intentionally not updated for
-                # this spatially-degenerate point (updating would add noise).
-                # Fix 1 (MIN_PRIMITIVES=32) prevents this path during normal training.
-                self.norm.eval()
-                try:
-                    point = self.norm(point)
-                finally:
-                    self.norm.train()
-            else:
-                point = self.norm(point)
+            point = self.norm(point)
         if self.act is not None:
             point = self.act(point)
         point.sparsify()
