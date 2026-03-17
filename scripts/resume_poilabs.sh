@@ -26,7 +26,7 @@ torchrun \
     --node_rank=$NODE_RANK \
     launch.py \
     --launch_mode resume \
-    --resume_from_checkpoint /content/drive/MyDrive/My_Computer/vecformer_data/cp_98/  \
+    --resume_from_checkpoint /content/drive/MyDrive/My_Computer/vecformer_data/workdir/finetuneV2/20260311_021148/checkpoint-226176  \
     --config_path configs/vecformer.yaml \
     --model_args_path configs/model/vecformer_poilabs.yaml \
     --data_args_path configs/data/floorplancad.yaml \
