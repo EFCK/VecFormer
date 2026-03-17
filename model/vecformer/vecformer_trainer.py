@@ -138,6 +138,49 @@ class VecFormerTrainer(Trainer):
         # This removes training step logs from state.log_history, keeping only eval logs
         self.add_callback(LogHistoryCleanupCallback())
 
+    def _load_optimizer_and_scheduler(self, checkpoint):
+        """
+        Override HuggingFace Trainer's optimizer and scheduler loading to allow
+        updating learning rate and decay steps upon resuming.
+        """
+        # changed by efck - 2026-03-17 - aim: override HF trainer resume to allow learning rate and scheduler updates
+        super()._load_optimizer_and_scheduler(checkpoint)
+        
+        # Override optimizer learning rate and recreate scheduler based on current config
+        if self.optimizer is not None and self.lr_scheduler is not None:
+            config_lr = self.args.learning_rate
+            
+            logger.info("Re-evaluating scheduler and learning rate from config...")
+            
+            # 1. Update optimizer base learning rates
+            for group in self.optimizer.param_groups:
+                if 'initial_lr' in group:
+                    group['initial_lr'] = config_lr
+                # For safety, also update 'lr' so the next step() uses it if scheduler doesn't instantly overwrite it
+                group['lr'] = config_lr 
+
+            # 2. Recreate scheduler with new configuration
+            last_epoch = self.lr_scheduler.last_epoch
+            self.lr_scheduler = None
+            
+            # Retrieve max_steps from trainer state if available, or compute it
+            max_steps = self.state.max_steps if self.state.max_steps > 0 else self.args.max_steps
+            
+            self.create_scheduler(num_training_steps=max_steps, optimizer=self.optimizer)
+            
+            # 3. Restore the progress
+            if hasattr(self.lr_scheduler, "last_epoch"):
+                self.lr_scheduler.last_epoch = last_epoch
+            
+            # Step the scheduler to update the current lr according to the new schedule
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.lr_scheduler.step()
+                
+            logger.warning(f"Overridden learning rate to {config_lr}. "
+                           f"Recreated scheduler with max_steps={max_steps} and fast-forwarded to step {last_epoch}.")
+
     def log(self, logs: Dict[str, float], start_time: Optional[float] = None) -> None:
         # ----------- hack to log multiple loss ---------- #
         if self.custom_logs_is_training:
