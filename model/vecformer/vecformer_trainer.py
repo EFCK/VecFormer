@@ -94,6 +94,71 @@ class WandbBestMetricCallback(TrainerCallback):
         )
 
 
+# changed by efck - 2026-03-18 - aim: fix LR being 1e-6 instead of config 1e-5 on resume;
+# root cause: _load_optimizer_and_scheduler ran before state.max_steps was set (max_steps=-1),
+# making warmup_stable_decay decay formula malformed and clamping LR to min_lr_ratio.
+# fix: defer scheduler recreation to on_train_begin where state.max_steps is always correct.
+class ResumeSchedulerFixCallback(TrainerCallback):
+    """
+    Deferred scheduler fix for resume runs.
+
+    _load_optimizer_and_scheduler is called before HF Trainer reliably sets
+    state.max_steps (in some versions the checkpoint's trainer_state.json
+    replaces the state object, leaving max_steps=-1 until the training loop
+    computes it). This callback fires in on_train_begin, where state.max_steps
+    is always correctly set, and recreates the scheduler with the right total
+    steps + the right starting position.
+    """
+
+    def __init__(self, trainer: "VecFormerTrainer"):
+        self.trainer = trainer
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        if not getattr(self.trainer, "_needs_scheduler_fix", False):
+            return
+        if state.max_steps <= 0:
+            logger.warning(
+                "ResumeSchedulerFixCallback: state.max_steps not yet set, skipping scheduler fix."
+            )
+            return
+
+        import warnings
+
+        config_lr = args.learning_rate
+        checkpoint_step = self.trainer._resume_checkpoint_step
+
+        # Recreate the scheduler with the correct total step count.
+        # Restoring last_epoch to checkpoint_step places the scheduler in the
+        # stable phase (checkpoint_step is between warmup and decay for typical
+        # schedules), giving LR = config_lr immediately.
+        # Decay starts at total_steps - num_decay_steps from the beginning of
+        # the schedule, which equals remaining_steps - num_decay_steps from now.
+        self.trainer.lr_scheduler = None
+        self.trainer.create_scheduler(
+            num_training_steps=state.max_steps, optimizer=self.trainer.optimizer
+        )
+
+        # Advance to checkpoint_step: set last_epoch = step - 1, then step() → step
+        if hasattr(self.trainer.lr_scheduler, "last_epoch"):
+            self.trainer.lr_scheduler.last_epoch = max(0, checkpoint_step - 1)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.trainer.lr_scheduler.step()  # → last_epoch = checkpoint_step, LR = config_lr
+
+        # Keep callback_handler's reference in sync with the new scheduler object
+        if hasattr(self.trainer, "callback_handler"):
+            self.trainer.callback_handler.lr_scheduler = self.trainer.lr_scheduler
+
+        self.trainer._needs_scheduler_fix = False
+
+        num_decay_steps = (args.lr_scheduler_kwargs or {}).get("num_decay_steps", 0)
+        decay_in = state.max_steps - checkpoint_step - num_decay_steps
+        logger.warning(
+            f"Recreated scheduler: LR={config_lr}, max_steps={state.max_steps}, "
+            f"restored to step={checkpoint_step}. Decay starts in {decay_in} steps."
+        )
+
+
 class VecFormerTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         # Use the actual model's config for MetricsComputer so that ignore_label
@@ -123,6 +188,10 @@ class VecFormerTrainer(Trainer):
         self.custom_logs_accumulated_step: Dict[str, int] = {}
         self.custom_logs_is_training: bool = False
 
+        # Flags used by _load_optimizer_and_scheduler + ResumeSchedulerFixCallback
+        self._needs_scheduler_fix: bool = False
+        self._resume_checkpoint_step: int = 0
+
         # Add wandb best metric callback if wandb is available
         if WANDB_AVAILABLE:
             metric_for_best = (
@@ -138,48 +207,41 @@ class VecFormerTrainer(Trainer):
         # This removes training step logs from state.log_history, keeping only eval logs
         self.add_callback(LogHistoryCleanupCallback())
 
+        # Deferred scheduler fix for resume runs (no-op on fresh training)
+        self.add_callback(ResumeSchedulerFixCallback(trainer=self))
+
+    # changed by efck - 2026-03-18 - aim: override HF trainer resume to allow LR and scheduler updates
     def _load_optimizer_and_scheduler(self, checkpoint):
         """
         Override HuggingFace Trainer's optimizer and scheduler loading to allow
         updating learning rate and decay steps upon resuming.
-        """
-        # changed by efck - 2026-03-17 - aim: override HF trainer resume to allow learning rate and scheduler updates
-        super()._load_optimizer_and_scheduler(checkpoint)
-        
-        # Override optimizer learning rate and recreate scheduler based on current config
-        if self.optimizer is not None and self.lr_scheduler is not None:
-            config_lr = self.args.learning_rate
-            
-            logger.info("Re-evaluating scheduler and learning rate from config...")
-            
-            # 1. Update optimizer base learning rates
-            for group in self.optimizer.param_groups:
-                if 'initial_lr' in group:
-                    group['initial_lr'] = config_lr
-                # For safety, also update 'lr' so the next step() uses it if scheduler doesn't instantly overwrite it
-                group['lr'] = config_lr 
 
-            # 2. Recreate scheduler with new configuration
-            last_epoch = self.lr_scheduler.last_epoch
-            self.lr_scheduler = None
-            
-            # Retrieve max_steps from trainer state if available, or compute it
-            max_steps = self.state.max_steps if self.state.max_steps > 0 else self.args.max_steps
-            
-            self.create_scheduler(num_training_steps=max_steps, optimizer=self.optimizer)
-            
-            # 3. Restore the progress
-            if hasattr(self.lr_scheduler, "last_epoch"):
-                self.lr_scheduler.last_epoch = last_epoch
-            
-            # Step the scheduler to update the current lr according to the new schedule
-            import warnings
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                self.lr_scheduler.step()
-                
-            logger.warning(f"Overridden learning rate to {config_lr}. "
-                           f"Recreated scheduler with max_steps={max_steps} and fast-forwarded to step {last_epoch}.")
+        Only the optimizer LRs are updated here. Scheduler recreation is deferred
+        to ResumeSchedulerFixCallback.on_train_begin where state.max_steps is
+        reliably set (avoids the max_steps=-1 bug from earlier approach).
+        """
+        super()._load_optimizer_and_scheduler(checkpoint)
+
+        if self.optimizer is None or self.lr_scheduler is None:
+            return
+
+        config_lr = self.args.learning_rate
+
+        # Update optimizer base learning rates
+        for group in self.optimizer.param_groups:
+            if "initial_lr" in group:
+                group["initial_lr"] = config_lr
+            group["lr"] = config_lr
+
+        # Save checkpoint step for the deferred scheduler fix
+        self._resume_checkpoint_step = self.lr_scheduler.last_epoch
+        self._needs_scheduler_fix = True
+
+        logger.warning(
+            f"Optimizer LR overridden to {config_lr}. "
+            f"Scheduler will be recreated on_train_begin "
+            f"(checkpoint_step={self._resume_checkpoint_step})."
+        )
 
     def log(self, logs: Dict[str, float], start_time: Optional[float] = None) -> None:
         # ----------- hack to log multiple loss ---------- #
