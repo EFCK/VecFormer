@@ -120,17 +120,21 @@ class FloorPlanCAD(Dataset):
 
     @staticmethod
     def collate_fn(
-        batch: list[VecData]
-    ) -> Dict[str, torch.Tensor]:
+        batch: list[VecData],
+        min_primitives: int = None,
+    ) -> Optional[Dict[str, torch.Tensor]]:
         """
         Collate function for FloorPlanCAD dataset, concatenate variable length sequences in the batch.
 
         Args:
 
             `batch`: List of `VecData` objects with variable length sequences
+            `min_primitives`: Minimum number of primitives per sample. Samples below
+                this threshold are filtered out. Defaults to `MIN_PRIMITIVES` (32).
+                Set to 0 to disable filtering (e.g. for inference).
 
         Returns:
-            Dict containing concatenated tensors:
+            Dict containing concatenated tensors, or None if all samples were filtered:
                 # Inputs
                 `coords`: (N1+N2+..., coords_dim) - Concatenated coordinates
                 `feats`: (N1+N2+..., feats_dim) - Concatenated features
@@ -151,21 +155,27 @@ class FloorPlanCAD(Dataset):
         if not batch:
             raise ValueError("Batch cannot be empty")
 
+        if min_primitives is None:
+            min_primitives = FloorPlanCAD.MIN_PRIMITIVES
+
         # changed by efck: filter out degenerate samples with too few primitives. These produce
         # no meaningful gradients and can crash SparseMatcher (topk out of range).
-        valid_batch = [item for item in batch if len(item.coords) >= FloorPlanCAD.MIN_PRIMITIVES]
-        if len(valid_batch) < len(batch):
-            skipped_paths = [item.data_path for item in batch if len(item.coords) < FloorPlanCAD.MIN_PRIMITIVES]
-            logger.warning(
-                f"collate_fn: filtered {len(batch) - len(valid_batch)} degenerate sample(s) "
-                f"with <{FloorPlanCAD.MIN_PRIMITIVES} primitives: {skipped_paths}"
-            )
-        if not valid_batch:
-            raise ValueError(
-                f"All {len(batch)} samples in batch were filtered out "
-                f"(<{FloorPlanCAD.MIN_PRIMITIVES} primitives each)"
-            )
-        batch = valid_batch
+        # Note: this filter is only needed for training; inference can handle any N >= 1.
+        if min_primitives > 0:
+            valid_batch = [item for item in batch if len(item.coords) >= min_primitives]
+            if len(valid_batch) < len(batch):
+                skipped_paths = [item.data_path for item in batch if len(item.coords) < min_primitives]
+                logger.warning(
+                    f"collate_fn: filtered {len(batch) - len(valid_batch)} degenerate sample(s) "
+                    f"with <{min_primitives} primitives: {skipped_paths}"
+                )
+            if not valid_batch:
+                logger.warning(
+                    f"All {len(batch)} samples in batch were filtered out "
+                    f"(<{min_primitives} primitives each)"
+                )
+                return None
+            batch = valid_batch
 
         # Define fields to extract and pad
         fields = ['coords', 'feats', 'prim_ids', 'layer_ids', 'sem_ids', 'inst_ids', 'prim_lengths']

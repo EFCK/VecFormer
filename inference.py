@@ -26,6 +26,7 @@ import logging
 import os
 import time
 from datetime import datetime
+from functools import partial
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -227,7 +228,9 @@ def load_dataset(datadir: str):
         eval_transform_args=eval_transform_args,
     )
 
-    return dataset, FloorPlanCAD.collate_fn
+    # Disable MIN_PRIMITIVES filter for inference — the model handles any N >= 1
+    # in eval mode (no SparseMatcher, BatchNorm uses running stats).
+    return dataset, partial(FloorPlanCAD.collate_fn, min_primitives=0)
 
 
 def json_path_to_svg_path(json_path: str) -> str:
@@ -538,6 +541,10 @@ def run_inference(
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(tqdm.tqdm(dataloader, desc="Inference")):
+            if batch is None:
+                skipped_files.append(f"batch_{batch_idx}_too_few_primitives")
+                logger.warning(f"Skipped batch {batch_idx}: too few primitives")
+                continue
             try:
                 # Move batch to device
                 batch_device = {}
