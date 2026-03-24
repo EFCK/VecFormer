@@ -78,3 +78,5 @@ results/**/*.svg
 !results/**/*.log
 !results/**/*.json
 /plans
+/configs/finetunev2
+/results/FinetuneV2
