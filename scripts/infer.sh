@@ -10,13 +10,13 @@ export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 # ==================== Configuration ==================== #
 # Dataset directory (contains train/val/test subdirectories)
-datadir=datasets/line_json/FinetuneV2/test
+datadir=datasets/line_json/FinetuneV2/test/
 
 # Output directory for results
-out=results/FinetuneV2/trained/test
+out=results/FinetuneV2/test_fresh/
 
 # Model checkpoint directory (contains model.safetensors)
-checkpoint=configs/cp_98
+checkpoint=configs/cp_192
 
 
 
