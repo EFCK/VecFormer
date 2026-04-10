@@ -80,3 +80,4 @@ results/**/*.svg
 /plans
 /configs/finetunev2
 /results/FinetuneV2
+/configs/cp_192
