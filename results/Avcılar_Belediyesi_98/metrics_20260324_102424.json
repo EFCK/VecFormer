@@ -1,0 +1,524 @@
+{
+  "metrics": {
+    "PQ": 89.37867879867554,
+    "SQ": 94.09937858581543,
+    "RQ": 94.98327970504761,
+    "thing_PQ": 90.03589749336243,
+    "thing_SQ": 94.41856741905212,
+    "thing_RQ": 95.35825252532959,
+    "stuff_PQ": 62.67370581626892,
+    "stuff_SQ": 78.59084010124207,
+    "stuff_RQ": 79.7468364238739,
+    "per_class_PQ": {
+      "0": {
+        "PQ": 91.59790277481079,
+        "SQ": 92.70001649856567,
+        "RQ": 98.81109595298767,
+        "TP": 748,
+        "FP": 5,
+        "FN": 13,
+        "ignored": false
+      },
+      "1": {
+        "PQ": 86.92912459373474,
+        "SQ": 88.89538049697876,
+        "RQ": 97.78812527656555,
+        "TP": 420,
+        "FP": 0,
+        "FN": 19,
+        "ignored": false
+      },
+      "2": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": false
+      },
+      "3": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "4": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": false
+      },
+      "5": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "6": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 7,
+        "ignored": false
+      },
+      "7": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "8": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "9": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "10": {
+        "PQ": 66.88032746315002,
+        "SQ": 85.78128814697266,
+        "RQ": 77.96609997749329,
+        "TP": 23,
+        "FP": 0,
+        "FN": 13,
+        "ignored": false
+      },
+      "11": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "12": {
+        "PQ": 94.64993476867676,
+        "SQ": 97.74789214134216,
+        "RQ": 96.83066606521606,
+        "TP": 1604,
+        "FP": 101,
+        "FN": 4,
+        "ignored": false
+      },
+      "13": {
+        "PQ": 67.64320135116577,
+        "SQ": 83.42661261558533,
+        "RQ": 81.08108043670654,
+        "TP": 90,
+        "FP": 1,
+        "FN": 41,
+        "ignored": false
+      },
+      "14": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "15": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "16": {
+        "PQ": 66.85205698013306,
+        "SQ": 84.38034057617188,
+        "RQ": 79.22705411911011,
+        "TP": 82,
+        "FP": 6,
+        "FN": 37,
+        "ignored": false
+      },
+      "17": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "18": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 31,
+        "ignored": false
+      },
+      "19": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "20": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "21": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "22": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "23": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": true
+      },
+      "24": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": false
+      },
+      "25": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": false
+      },
+      "26": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 16,
+        "ignored": false
+      },
+      "27": {
+        "PQ": 95.32672762870789,
+        "SQ": 97.35495448112488,
+        "RQ": 97.91666865348816,
+        "TP": 94,
+        "FP": 0,
+        "FN": 4,
+        "ignored": false
+      },
+      "28": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": false
+      },
+      "29": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": false
+      },
+      "30": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": false
+      },
+      "31": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 0,
+        "ignored": false
+      },
+      "32": {
+        "PQ": 68.76698732376099,
+        "SQ": 78.59084010124207,
+        "RQ": 87.5,
+        "TP": 63,
+        "FP": 5,
+        "FN": 13,
+        "ignored": false
+      },
+      "33": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 9,
+        "FN": 1,
+        "ignored": false
+      },
+      "34": {
+        "PQ": 0.0,
+        "SQ": 0.0,
+        "RQ": 0.0,
+        "TP": 0,
+        "FP": 0,
+        "FN": 4,
+        "ignored": false
+      }
+    },
+    "total_TP": 3124,
+    "total_FP": 127,
+    "total_FN": 203,
+    "F1": 0.4755258560180664,
+    "per_class_IoU": {
+      "0": {
+        "IoU": 77.08446383476257,
+        "ignored": false
+      },
+      "1": {
+        "IoU": 57.586777210235596,
+        "ignored": false
+      },
+      "2": {
+        "IoU": 0.0,
+        "ignored": false
+      },
+      "3": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "4": {
+        "IoU": 0.0,
+        "ignored": false
+      },
+      "5": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "6": {
+        "IoU": 0.0,
+        "ignored": false
+      },
+      "7": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "8": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "9": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "10": {
+        "IoU": 40.76433479785919,
+        "ignored": false
+      },
+      "11": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "12": {
+        "IoU": 58.69969725608826,
+        "ignored": false
+      },
+      "13": {
+        "IoU": 49.948689341545105,
+        "ignored": false
+      },
+      "14": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "15": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "16": {
+        "IoU": 68.87016892433167,
+        "ignored": false
+      },
+      "17": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "18": {
+        "IoU": 0.04664265434257686,
+        "ignored": false
+      },
+      "19": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "20": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "21": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "22": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "23": {
+        "IoU": 0.0,
+        "ignored": true
+      },
+      "24": {
+        "IoU": 0.0,
+        "ignored": false
+      },
+      "25": {
+        "IoU": 0.0,
+        "ignored": false
+      },
+      "26": {
+        "IoU": 0.0,
+        "ignored": false
+      },
+      "27": {
+        "IoU": 57.227665185928345,
+        "ignored": false
+      },
+      "28": {
+        "IoU": 0.0,
+        "ignored": false
+      },
+      "29": {
+        "IoU": 0.0,
+        "ignored": false
+      },
+      "30": {
+        "IoU": 0.0,
+        "ignored": false
+      },
+      "31": {
+        "IoU": 0.0,
+        "ignored": false
+      },
+      "32": {
+        "IoU": 49.36376512050629,
+        "ignored": false
+      },
+      "33": {
+        "IoU": 0.19740615971386433,
+        "ignored": false
+      },
+      "34": {
+        "IoU": 0.0,
+        "ignored": false
+      }
+    },
+    "mIoU": 21.8947433564435,
+    "fwIoU": 46.71822223698996,
+    "pACC": 53.89472842216492,
+    "wF1": 0.6368171572685242
+  },
+  "timing": {
+    "total_time": 6.66455052499964,
+    "avg_time_per_sample": 0.23801966160713,
+    "num_samples": 28,
+    "primitives_min": 1,
+    "primitives_mean": 1070.8,
+    "primitives_max": 6836,
+    "primitives_std": 1996.7,
+    "min_time_per_sample": 0.05946762499979741,
+    "max_time_per_sample": 1.3942720310001278,
+    "std_time_per_sample": 0.3076954763480382,
+    "vram_allocated_min_mb": 243.8,
+    "vram_allocated_mean_mb": 375.1,
+    "vram_allocated_max_mb": 1392.7,
+    "vram_allocated_std_mb": 311.0,
+    "vram_reserved_min_mb": 260.0,
+    "vram_reserved_mean_mb": 405.7,
+    "vram_reserved_max_mb": 1512.0,
+    "vram_reserved_std_mb": 336.7,
+    "vram_physical_min_mb": 2645.5,
+    "vram_physical_mean_mb": 2790.2,
+    "vram_physical_max_mb": 3897.5,
+    "vram_physical_std_mb": 336.5
+  },
+  "skipped_files": [],
+  "has_ground_truth": true,
+  "ignore_mode": "poilabs",
+  "ignore_label": [
+    35,
+    3,
+    5,
+    7,
+    8,
+    9,
+    11,
+    14,
+    15,
+    17,
+    19,
+    20,
+    21,
+    22,
+    23
+  ]
+}

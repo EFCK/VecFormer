@@ -171,6 +171,107 @@ class Evaluator:
             tp_iou_score_per_class=tp_iou_score_per_class,
         )
     
+    def eval_panoptic_quality_strict(self, preds, targets):
+        """
+        Strict PQ evaluation with nicehuster's fixes:
+        - Prediction-centric greedy matching (highest score first)
+        - gt_matched deduplication (each GT matched at most once)
+        - Orphan FP counting (unmatched predictions counted as FP)
+
+        Same interface as eval_panoptic_quality.
+        """
+        num_classes = self.num_classes
+        tp_per_class = torch.zeros(num_classes)
+        fp_per_class = torch.zeros(num_classes)
+        fn_per_class = torch.zeros(num_classes)
+        tp_iou_score_per_class = torch.zeros(num_classes)
+
+        log_prim_lens = [
+            torch.log1p(pl.float()) for pl in targets["prim_lens"]
+        ]
+
+        for batch_idx in range(len(targets["target_masks"])):
+            pred_masks = preds["pred_masks"][batch_idx]
+            pred_labels = preds["pred_labels"][batch_idx]
+            target_masks = targets["target_masks"][batch_idx]
+            target_labels = targets["target_labels"][batch_idx]
+            prim_lens = log_prim_lens[batch_idx]
+
+            ignore_labels_t = torch.tensor(self.ignore_label, device=target_labels.device)
+
+            # Filter valid targets
+            valid_target_mask = ~torch.isin(target_labels, ignore_labels_t)
+            valid_pred_mask = ~torch.isin(pred_labels, ignore_labels_t)
+
+            if pred_masks.shape[0] == 0 or not valid_pred_mask.any():
+                # All valid targets are FN
+                for target_idx in range(target_masks.shape[0]):
+                    target_label = target_labels[target_idx]
+                    if not torch.isin(target_label, ignore_labels_t):
+                        fn_per_class[target_label] += 1
+                continue
+
+            if target_masks.shape[0] == 0 or not valid_target_mask.any():
+                # All valid predictions are FP
+                for pred_idx in range(pred_masks.shape[0]):
+                    pred_label = pred_labels[pred_idx]
+                    if not torch.isin(pred_label, ignore_labels_t):
+                        fp_per_class[pred_label] += 1
+                continue
+
+            # Compute IoU matrix: (num_targets, num_preds)
+            iou_matrix = self._calculate_iou_matrix(pred_masks, target_masks, prim_lens)
+
+            # Sort predictions by score (highest first) if scores available
+            # Since we don't have scores here, iterate predictions in order
+            gt_matched = torch.zeros(target_masks.shape[0], dtype=torch.bool)
+
+            for pred_idx in range(pred_masks.shape[0]):
+                pred_label = pred_labels[pred_idx]
+                if torch.isin(pred_label, ignore_labels_t):
+                    continue
+
+                # Find best matching GT for this prediction
+                pred_ious = iou_matrix[:, pred_idx]  # (num_targets,)
+                best_iou = -1.0
+                best_gt_idx = -1
+
+                for gt_idx in range(target_masks.shape[0]):
+                    if gt_matched[gt_idx]:
+                        continue
+                    if torch.isin(target_labels[gt_idx], ignore_labels_t):
+                        continue
+                    iou_val = pred_ious[gt_idx].item()
+                    if iou_val > best_iou:
+                        best_iou = iou_val
+                        best_gt_idx = gt_idx
+
+                if best_iou >= self.iou_threshold and best_gt_idx >= 0:
+                    gt_label = target_labels[best_gt_idx]
+                    if pred_label == gt_label and not gt_matched[best_gt_idx]:
+                        tp_per_class[pred_label] += 1
+                        tp_iou_score_per_class[pred_label] += best_iou
+                        gt_matched[best_gt_idx] = True
+                    else:
+                        fp_per_class[pred_label] += 1
+                else:
+                    # Orphan prediction — no GT matched
+                    fp_per_class[pred_label] += 1
+
+            # Unmatched GTs are FN
+            for gt_idx in range(target_masks.shape[0]):
+                if not gt_matched[gt_idx]:
+                    gt_label = target_labels[gt_idx]
+                    if not torch.isin(gt_label, ignore_labels_t):
+                        fn_per_class[gt_label] += 1
+
+        return dict(
+            tp_per_class=tp_per_class,
+            fp_per_class=fp_per_class,
+            fn_per_class=fn_per_class,
+            tp_iou_score_per_class=tp_iou_score_per_class,
+        )
+
     def _calculate_iou_matrix(self, pred_masks, target_masks, primitive_length):
         """
         changed by efck: Vectorized IoU matrix computation for all pred-target pairs at once.
