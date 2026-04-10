@@ -1,9 +1,7 @@
-import json, os, glob
+import os
 import numpy as np
 import xml.etree.ElementTree as ET
-from collections import Counter
-from svgpathtools import parse_path
-import re, math
+from svgpathtools import parse_path, svgstr2paths
 from pathlib import Path
 
 import torch
@@ -12,6 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 Image.MAX_IMAGE_PIXELS = None
 
 from model.vecformer.evaluator.evaluator import Evaluator, EvaluatorConfig
+from utils.svg_util import get_namespace, add_ns, del_ns, primitive2str
 
 
 # FloorPlanCAD 36-class color table (0-indexed; index == VecFormer label).
@@ -79,178 +78,128 @@ def resolve_svg_path(npy_filepath: str, svg_dir: str = None) -> str:
     return path.replace('/line_json/', '/svg/')
 
 
-def svg_reader(svg_path):
-    svg_list = list()
-    try:
-        tree = ET.parse(svg_path)
-    except Exception as e:
-        print("Read{} failed!".format(svg_path))
-        return svg_list
+def parse_svg_tree(svg_path):
+    """Parse SVG and return (tree, root, namespace) for in-place editing."""
+    tree = ET.parse(svg_path)
     root = tree.getroot()
-    for elem in root.iter():
-        line = elem.attrib
-        line['tag'] = elem.tag
-        svg_list.append(line)
-    return svg_list
+    namespace = get_namespace(root)
+    return tree, root, namespace
 
 
+def get_drawable_primitives(root, namespace):
+    """Yield drawable primitives in the exact same order as preprocess.py parse_svg()."""
+    groups = list(root.iter(add_ns("g", namespace)))
+    if len(groups) > 0:
+        for group in groups:
+            if len(group) == 0:
+                continue
+            for primitive in group:
+                yield primitive
+    else:
+        drawable_tags = {add_ns(t, namespace) for t in
+            ("path", "circle", "ellipse", "rect", "line", "polyline", "polygon")}
+        for child in root:
+            if child.tag in drawable_tags:
+                yield child
 
-def svg_writer(svg_list, svg_path):
-    root = None
-    current_parent = None
 
-    for idx, line in enumerate(svg_list):
-        tag = line["tag"]
-        line.pop("tag")
-
-        if idx == 0:
-            root = ET.Element(tag)
-            root.attrib = line
-            current_parent = root
+def compute_primitive_length(primitive, namespace):
+    """Compute primitive length exactly like preprocess.py parse_primitive().
+    Returns length (float). Returns 0.0 if primitive is invalid/degenerate."""
+    tag = del_ns(primitive.tag, namespace)
+    try:
+        if tag == "path":
+            path_str = primitive.attrib.get("d", "")
+            if not path_str:
+                return 0.0
+            path = parse_path(path_str)
+            length = path.length()
+            return length if isinstance(length, float) else 0.0
         else:
-            if "}g" in tag:
-                group = ET.SubElement(root, tag)
-                group.attrib = line
-                current_parent = group
-            else:
-                # Support both grouped and ungrouped SVG formats
-                if current_parent is None:
-                    current_parent = root
-                node = ET.SubElement(current_parent, tag)
-                node.attrib = line
+            # rect, circle, ellipse, line, polyline, polygon
+            paths, _ = svgstr2paths(primitive2str(primitive))
+            if not paths:
+                return 0.0
+            length = paths[0].length()
+            return length if isinstance(length, float) else 0.0
+    except Exception:
+        return 0.0
 
-    from xml.dom import minidom
-    reparsed = minidom.parseString(ET.tostring(root, 'utf-8')).toprettyxml(indent="\t")
-    f = open(svg_path,'w',encoding='utf-8')
-    f.write(reparsed)
-    f.close()
-
-def visualSVG(parsing_list,labels,out_path,cvt_color=False):
-
-
-    ind = 0
-    for line in parsing_list:
-        tag = line["tag"].split("svg}")[-1]
-        assert tag in ['svg', 'g', 'path', 'circle', 'ellipse', 'text'],tag+" is error!!"
-        if tag in ["path","circle",]:
-            label = int(line["semanticIds"]) if "semanticIds" in line.keys() else -1
-            label = labels[ind]
-            color = SVG_CATEGORIES[label]["color"]
-            line["stroke"] = "rgb({:d},{:d},{:d})".format(color[0],color[1],color[2])
-            line["fill"] = "none"
-            line["stroke-width"] = "0.2"
-            ind += 1
-
-        if tag == "svg":
-            viewBox = line["viewBox"]
-            viewBox = viewBox.split(" ")
-            line["viewBox"] = " ".join(viewBox)
-            if cvt_color:
-                line["style"] = "background-color: #255255255;"
-
-
-    svg_writer(parsing_list, out_path)
-    return out_path
-
-def visualSVG_with_ids(parsing_list, sem_labels, ins_labels, out_path, ignore_labels=None, cvt_color=False):
+def visualSVG_with_ids(tree, root, namespace, sem_labels, ins_labels, out_path, ignore_labels=None, cvt_color=False):
     """
     Visualize SVG with model predictions for both semantic and instance IDs.
 
+    Uses the same traversal order as preprocess.py parse_svg() to keep primitive
+    indices in sync with model_output.npy.
+
     Args:
+        tree: ElementTree from parse_svg_tree()
+        root: root Element from parse_svg_tree()
+        namespace: SVG namespace from parse_svg_tree()
+        sem_labels: semantic labels array (N_primitives,)
+        ins_labels: instance labels array (N_primitives,)
+        out_path: output SVG path
         ignore_labels: List of label indices to filter out (map to background).
-                       If None, no filtering is applied.
+        cvt_color: whether to set white background
     """
     if ignore_labels is None:
         ignore_labels = []
 
-    # Get valid primitives (length >= 1e-10) like in parsing
-    # We need to compute lengths to know which primitives were actually fed to the model
-    # Model drops primitives with length < 1e-10
-    
-    valid_parsing_list = []
+    if cvt_color:
+        root.attrib["style"] = "background-color: #255255255;"
+
     ind = 0
-    for line in parsing_list:
-        tag = line["tag"].split("svg}")[-1]
-        assert tag in ['svg', 'g', 'path', 'circle', 'ellipse', 'text'], tag+" is error!!"
+    for primitive in get_drawable_primitives(root, namespace):
+        # Check validity exactly like preprocess.py
+        length = compute_primitive_length(primitive, namespace)
+        if length < 1e-10:
+            continue  # Skip without incrementing — preprocess also skips
 
-        if tag in ["path", "circle", "ellipse"]:
-            # Check if this primitive is valid (length >= 1e-10)
-            is_valid = True
-            if "d" in line:
-                try:
-                    path_repre = parse_path(line['d'])
-                    if path_repre.length() < 1e-10:
-                        is_valid = False
-                except Exception:
-                    pass
-            elif "r" in line:  # circle
-                try:
-                    if 2 * math.pi * float(line['r']) < 1e-10:
-                        is_valid = False
-                except (ValueError, KeyError):
-                    pass
-            if not is_valid:
-                continue
+        # Sanity check
+        if ind >= len(sem_labels):
+            tag = del_ns(primitive.tag, namespace)
+            raise IndexError(
+                f"Primitive index out of bounds: ind={ind} >= len(sem_labels)={len(sem_labels)}, "
+                f"tag={tag}, file={out_path}")
 
-            # Get model predictions
-            try:
-                sem_label = sem_labels[ind]
-            except IndexError:
-                print(f"\nERROR: out of bounds in {out_path}")
-                print(f"tag: {tag}")
-                print(f"ind: {ind}, len(sem_labels): {len(sem_labels)}, count svg tags: {len(parsing_list)}")
-                # count how many drawable primitives
-                prims = sum(1 for p in parsing_list if p["tag"].split("svg}")[-1] in ["path", "circle", "ellipse"])
-                print(f"Drawable primitives in parsed SVG: {prims}")
-                print(f"sem_labels shape: {sem_labels.shape}")
-                raise
-            ins_label = ins_labels[ind]
+        sem_label = sem_labels[ind]
+        ins_label = ins_labels[ind]
 
-            # Update semantic and instance IDs in SVG attributes
-            if sem_label in ignore_labels:
-                sem_label = 35 # Map to background
-                if "semanticId" in line:
-                    line.pop("semanticId")
-                if "instanceId" in line:
-                    line.pop("instanceId")
+        # Apply ignore labels
+        if sem_label in ignore_labels:
+            sem_label = 35  # Map to background
+            primitive.attrib.pop("semanticId", None)
+            primitive.attrib.pop("instanceId", None)
+        else:
+            primitive.attrib["semanticId"] = str(int(sem_label) + 1)  # +1: SVG uses 1-based
+            if sem_label in range(30, 35):
+                primitive.attrib["instanceId"] = "-1"
             else:
-                line["semanticId"] = str(int(sem_label) + 1)  # +1 because SVG uses 1-based indexing
-                if sem_label in [30, 31, 32, 33, 34]:
-                    line["instanceId"] = "-1"
-                else:
-                    line["instanceId"] = str(int(ins_label))
+                primitive.attrib["instanceId"] = str(int(ins_label))
 
-            # Set color based on semantic prediction
-            color = SVG_CATEGORIES[sem_label]["color"]
-            line["stroke"] = "rgb({:d},{:d},{:d})".format(color[0], color[1], color[2])
-            line["fill"] = "none"
-            line["stroke-width"] = "0.2"
-            ind += 1
+        # Set visualization color
+        color = SVG_CATEGORIES[sem_label]["color"]
+        primitive.attrib["stroke"] = "rgb({:d},{:d},{:d})".format(color[0], color[1], color[2])
+        primitive.attrib["fill"] = "none"
+        primitive.attrib["stroke-width"] = "0.2"
 
-        if tag == "svg":
-            viewBox = line["viewBox"]
-            viewBox = viewBox.split(" ")
-            line["viewBox"] = " ".join(viewBox)
-            if cvt_color:
-                line["style"] = "background-color: #255255255;"
+        ind += 1
 
-        valid_parsing_list.append(line)
+    # Sanity check: did we consume all labels?
+    if ind != len(sem_labels):
+        print(f"WARNING: primitive count mismatch in {out_path}: "
+              f"visited {ind} primitives but have {len(sem_labels)} labels")
 
-    svg_writer(valid_parsing_list, out_path)
+    # Write modified tree directly — preserves <g> hierarchy
+    tree.write(out_path, xml_declaration=True, encoding="unicode")
     return out_path
 
 
-def process_dt(input):
-    parsing_list, labels, out_path, generate_png = input
-
-    visualSVG(parsing_list, labels, out_path)
-    if generate_png:
-        svg2png(out_path)
-
 def process_dt_with_ids(input):
-    parsing_list, sem_labels, ins_labels, out_path, png_out_path, generate_png, coords, ignore_labels = input
+    svg_path, sem_labels, ins_labels, out_path, png_out_path, generate_png, coords, ignore_labels = input
 
-    visualSVG_with_ids(parsing_list, sem_labels, ins_labels, out_path, ignore_labels=ignore_labels)
+    tree, root, namespace = parse_svg_tree(svg_path)
+    visualSVG_with_ids(tree, root, namespace, sem_labels, ins_labels, out_path, ignore_labels=ignore_labels)
 
     if generate_png:
         # First convert SVG to PNG
@@ -329,62 +278,67 @@ def draw_bboxes_and_ids(png_path, coords, sem_labels, ins_labels, scale=7.0):
 
 
 
-def get_path(svg_lists):
+def get_path(root, namespace):
+    """Extract path coordinates from SVG using the same traversal as preprocess.py.
+
+    Args:
+        root: root Element from parse_svg_tree()
+        namespace: SVG namespace from parse_svg_tree()
+
+    Returns:
+        widths, gids, args, lengths, types
+    """
     args, widths, gids, lengths, types = [], [], [], [], []
-    COMMANDS = ['Line', 'Arc','circle', 'ellipse']
-    for line in svg_lists:
+    COMMANDS = ['Line', 'Arc', 'circle', 'ellipse']
 
-        if "d" in line.keys():
-            path_repre = parse_path(line['d'])
-            # Skip zero-length paths — model preprocessor drops these (prim_length < 1e-10)
-            try:
-                path_length = path_repre.length()
-            except (RuntimeError, ValueError):
-                path_length = 0.0
-            if path_length < 1e-10:
-                continue
+    for primitive in get_drawable_primitives(root, namespace):
+        length = compute_primitive_length(primitive, namespace)
+        if length < 1e-10:
+            continue
 
-            widths.append(line["stroke-width"])
-            gid = int(line["gid"]) if "gid" in line.keys() else -1
-            gids.append(gid)
-            inds = [0, 1/3, 2/3, 1.0]
-            arg = []
+        tag = del_ns(primitive.tag, namespace)
+        widths.append(primitive.attrib.get("stroke-width", "0.1"))
+        gid = int(primitive.attrib["gid"]) if "gid" in primitive.attrib else -1
+        gids.append(gid)
+
+        # Sample 4 points along the path for coordinate extraction
+        sample_ts = [0, 1/3, 2/3, 1.0]
+        arg = []
+
+        if tag == "path":
+            path_repre = parse_path(primitive.attrib.get("d", ""))
             try:
-                for ind in inds:
-                    point = path_repre.point(ind)
+                for t in sample_ts:
+                    point = path_repre.point(t)
                     arg.extend([point.real, point.imag])
             except (RuntimeError, ValueError):
                 try:
                     start_point = path_repre[0].start
-                    for _ in inds:
+                    for _ in sample_ts:
                         arg.extend([start_point.real, start_point.imag])
                 except (AttributeError, IndexError):
-                    for _ in inds:
+                    for _ in sample_ts:
                         arg.extend([0.0, 0.0])
-
-            args.append(arg)
-            lengths.append(path_length)
             path_type = path_repre[0].__class__.__name__
-            types.append(COMMANDS.index(path_type))
-        elif "r" in line.keys():
-            r = float(line['r'])
-            circle_len = 2 * math.pi * r
-            # Skip zero-radius circles — model preprocessor drops these
-            if circle_len < 1e-10:
-                continue
-            widths.append(line["stroke-width"])
-            gid = int(line["gid"]) if "gid" in line.keys() else -1
-            gids.append(gid)
-            cx = float(line['cx'])
-            cy = float(line['cy'])
-            arg = []
-            thetas = [0, math.pi/2, math.pi, 3 * math.pi/2]
-            for theta in thetas:
-                x, y = cx + r * math.cos(theta), cy + r * math.sin(theta)
-                arg.extend([x, y])
-            args.append(arg)
-            lengths.append(circle_len)
-            types.append(COMMANDS.index("circle"))
+            types.append(COMMANDS.index(path_type) if path_type in COMMANDS else 0)
+        else:
+            # All non-path types: convert via svgstr2paths (same as preprocess)
+            try:
+                paths, _ = svgstr2paths(primitive2str(primitive))
+                path_obj = paths[0]
+                for t in sample_ts:
+                    point = path_obj.point(t)
+                    arg.extend([point.real, point.imag])
+                path_type = path_obj[0].__class__.__name__
+                types.append(COMMANDS.index(path_type) if path_type in COMMANDS else 0)
+            except Exception:
+                for _ in sample_ts:
+                    arg.extend([0.0, 0.0])
+                types.append(0)
+
+        args.append(arg)
+        lengths.append(length)
+
     return widths, gids, args, lengths, types
 
 
@@ -411,6 +365,10 @@ if __name__ == "__main__":
                         help='Path to the output directory')
     parser.add_argument('--perfile', action='store_true', default=False,
                         help='Generate per-file PQ/RQ/SQ results alongside aggregated results')
+    parser.add_argument('--eval_mode', type=str, default="original",
+                        choices=["original", "strict"],
+                        help="Evaluation mode: 'original' uses target-centric matching (no dedup), "
+                             "'strict' uses prediction-centric greedy matching with dedup and orphan FP counting")
     parser.add_argument('--ignore_mode', type=str, default="background_only",
                         choices=["none"] + list(IGNORE_LABEL_MODES.keys()),
                         help="Ignore label mode: 'none' evaluates all classes, "
@@ -428,7 +386,9 @@ if __name__ == "__main__":
     iou_threshold = args.iou_threshold
     svg_dir = args.svg_dir if args.svg_dir else None
 
+    eval_mode = args.eval_mode
     print(f"Ignore label mode: {args.ignore_mode} ({ignore_labels})")
+    print(f"Eval mode: {eval_mode}")
 
     # Create VecFormer evaluator
     evaluator = Evaluator(EvaluatorConfig(
@@ -479,8 +439,8 @@ if __name__ == "__main__":
             print(f"Warning: SVG not found, skipping: {svg_path}")
             continue
 
-        parsing_list = svg_reader(svg_path)
-        widths, gids, path_args, lengths_arr, types = get_path(parsing_list)
+        tree, root, namespace = parse_svg_tree(svg_path)
+        widths, gids, path_args, lengths_arr, types = get_path(root, namespace)
         widths = np.array(widths)
         gids = np.array(gids)
         lengths_arr = np.array(lengths_arr)
@@ -587,7 +547,10 @@ if __name__ == "__main__":
                 "target_labels": [target_labels.long()],
                 "prim_lens": [lengths.float()],
             }
-            file_result = evaluator.eval_panoptic_quality(preds_eval, targets_eval)
+            if eval_mode == "strict":
+                file_result = evaluator.eval_panoptic_quality_strict(preds_eval, targets_eval)
+            else:
+                file_result = evaluator.eval_panoptic_quality(preds_eval, targets_eval)
             total_tp     += file_result["tp_per_class"].cpu().float()
             total_fp     += file_result["fp_per_class"].cpu().float()
             total_fn     += file_result["fn_per_class"].cpu().float()
@@ -620,7 +583,7 @@ if __name__ == "__main__":
 
         svg_out_path = os.path.join(out_dir, "svg", f"{data_name}_predicted.svg")
         png_out_path = os.path.join(out_dir, "png", f"{data_name}_predicted.png")
-        inputs.append([parsing_list, sem_out.astype(np.int64), ins_out.astype(np.int64),
+        inputs.append([svg_path, sem_out.astype(np.int64), ins_out.astype(np.int64),
                        svg_out_path, png_out_path, generate_png, coords, ignore_labels])
 
     # Compute and print final PQ
@@ -646,6 +609,7 @@ if __name__ == "__main__":
     print(f"\nPQ={pq:.2f}  SQ={sq:.2f}  RQ={rq:.2f}")
     print(f"thing PQ={thing_pq:.2f}  SQ={thing_sq:.2f}  RQ={thing_rq:.2f}")
     print(f"stuff PQ={stuff_pq:.2f}  SQ={stuff_sq:.2f}  RQ={stuff_rq:.2f}")
+    print(f"TP={int(total_tp[valid_all].sum())}  FP={int(total_fp[valid_all].sum())}  FN={int(total_fn[valid_all].sum())}")
 
     np.save(os.path.join(out_dir, "coco_res_val.npy"), coco_res)
 
