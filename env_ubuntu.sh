@@ -1,30 +1,25 @@
 #!/usr/bin/env bash
-# VecFormer Environment Activation Script for Windows WSL
-# Usage: source env_wsl.sh
+# VecFormer Environment Activation Script for Ubuntu (native Linux)
+# Usage: source env_ubuntu.sh
 #
 # This script activates the vecformer conda environment with proper CUDA settings.
 # If the environment doesn't exist, it will create it and install all dependencies.
 #
-# Differences from Fedora version:
-# - Adapted for WSL2 environment (uses Windows GPU drivers)
-# - Auto-detects GPU architecture
-# - Uses compatible CUDA/PyTorch versions for newer GPUs
+# Differences from Fedora version (env.sh):
+# - Auto-detects GPU architecture (supports Blackwell/Ada/Ampere)
+# - Supports CUDA 11.8 / 12.4 / 12.8 depending on GPU
+# - Handles Ubuntu conda discovery
 
 # Detect if being sourced or executed
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "This script must be sourced, not executed."
-    echo "Usage: source env_wsl.sh"
+    echo "Usage: source env_ubuntu.sh"
     exit 1
 fi
 
-# Check if running in WSL
-if ! grep -qi microsoft /proc/version 2>/dev/null; then
-    echo "Warning: This script is designed for WSL. Use env.sh for native Linux."
-fi
-
-# Check if nvidia-smi works (Windows drivers should provide this)
+# Check if nvidia-smi works
 if ! command -v nvidia-smi &> /dev/null; then
-    echo "Error: nvidia-smi not found. Please ensure NVIDIA drivers are installed on Windows."
+    echo "Error: nvidia-smi not found. Please ensure NVIDIA drivers are installed."
     return 1
 fi
 
@@ -32,13 +27,12 @@ fi
 detect_gpu_arch() {
     local compute_cap
     compute_cap=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')
-    
+
     if [[ -z "$compute_cap" ]]; then
         echo "8.6"  # Default to RTX 30xx
         return
     fi
-    
-    # Convert compute capability (e.g., "8.6" stays as "8.6", "12.0" becomes "12.0")
+
     echo "$compute_cap"
 }
 
@@ -63,30 +57,31 @@ if ! conda env list | grep -q "^vecformer "; then
     echo "=== VecFormer environment not found. Creating it now... ==="
     echo "This will take a while (installing dependencies)."
     echo ""
-    
+
     # Create new environment with Python 3.9
     conda create -n vecformer python=3.9 -y
-    
-    # Activate environment (need to source conda.sh again for activation to work)
+
+    # Activate environment
     source "$(conda info --base)/etc/profile.d/conda.sh"
     conda activate vecformer
-    
+
     if [[ -z "$CONDA_PREFIX" ]] || [[ "$CONDA_DEFAULT_ENV" != "vecformer" ]]; then
         echo "Error: Failed to activate vecformer environment."
-        echo "Please run: conda activate vecformer && source env_wsl.sh"
+        echo "Please run: conda activate vecformer && source env_ubuntu.sh"
         return 1
     fi
-    
+
     # Upgrade pip
     python -m pip install --upgrade pip
-    
+
     # Determine PyTorch/CUDA version based on GPU architecture
-    # RTX 50xx (Blackwell, compute 12.0) needs CUDA 12.x
-    # RTX 40xx (Ada, compute 8.9) works with CUDA 11.8 or 12.x
-    # RTX 30xx (Ampere, compute 8.6) works with CUDA 11.8
-    
+    # RTX 50xx (Blackwell, compute 12.0) needs CUDA 12.8+
+    # RTX 40xx (Ada, compute 8.9) works with CUDA 12.4
+    # RTX 30xx/20xx (Ampere/Turing, compute 8.6/7.5) works with CUDA 11.8
+
     MAJOR_ARCH=$(echo "$GPU_ARCH" | cut -d. -f1)
-    
+    MINOR_ARCH=$(echo "$GPU_ARCH" | cut -d. -f2)
+
     if [[ "$MAJOR_ARCH" -ge 12 ]]; then
         # Blackwell (RTX 50xx) - needs CUDA 12.8+
         echo "=== Detected Blackwell GPU (RTX 50xx). Installing PyTorch with CUDA 12.8 ==="
@@ -94,7 +89,7 @@ if ! conda env list | grep -q "^vecformer "; then
         CUDA_VERSION="12.8"
         TORCH_SCATTER_URL="https://data.pyg.org/whl/torch-2.7.0+cu128.html"
     elif [[ "$MAJOR_ARCH" -ge 9 ]] || [[ "$GPU_ARCH" == "8.9" ]]; then
-        # Ada Lovelace (RTX 40xx) - use CUDA 12.4 for better compatibility
+        # Ada Lovelace (RTX 40xx) - use CUDA 12.4
         echo "=== Detected Ada Lovelace GPU (RTX 40xx). Installing PyTorch with CUDA 12.4 ==="
         pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
         CUDA_VERSION="12.4"
@@ -106,7 +101,7 @@ if ! conda env list | grep -q "^vecformer "; then
         CUDA_VERSION="11.8"
         TORCH_SCATTER_URL="https://data.pyg.org/whl/torch-2.5.0+cu118.html"
     fi
-    
+
     # Install CUDA toolkit via conda (matching version)
     echo "=== Installing CUDA toolkit via conda ==="
     if [[ "$CUDA_VERSION" == "12.8" ]]; then
@@ -117,11 +112,11 @@ if ! conda env list | grep -q "^vecformer "; then
     else
         conda install -y -c nvidia/label/cuda-11.8.0 cuda-nvcc cuda-toolkit
     fi
-    
+
     # Install GCC compiler
     echo "=== Installing compatible GCC compiler ==="
     conda install -y -c conda-forge gcc_linux-64=11 gxx_linux-64=11
-    
+
     # Set environment variables for building
     export CUDA_HOME="$CONDA_PREFIX"
     export PATH="$CUDA_HOME/bin:$PATH"
@@ -131,16 +126,16 @@ if ! conda env list | grep -q "^vecformer "; then
     export CXX="$CONDA_PREFIX/bin/x86_64-conda-linux-gnu-c++"
     export CUDAHOSTCXX="$CXX"
     export TORCH_CUDA_ARCH_LIST="$GPU_ARCH"
-    
+
     # Install build dependencies
     echo "=== Installing build dependencies ==="
     pip install packaging ninja psutil
-    
+
     # Install torch-scatter
     echo "=== Installing torch-scatter ==="
     pip install torch-scatter -f "$TORCH_SCATTER_URL" || \
     pip install torch-scatter  # Fallback to building from source
-    
+
     # Install flash-attention
     echo "=== Installing flash-attention ==="
     if [[ "$CUDA_VERSION" == "11.8" ]]; then
@@ -148,13 +143,13 @@ if ! conda env list | grep -q "^vecformer "; then
         pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.5.8/flash_attn-2.5.8+cu118torch2.3cxx11abiFALSE-cp39-cp39-linux_x86_64.whl 2>/dev/null || \
         pip install flash-attn --no-build-isolation
     else
-        # For CUDA 12.x, install from PyPI or build from source
+        # For CUDA 12.x, build from source
         pip install flash-attn --no-build-isolation 2>/dev/null || {
             echo "=== Building flash-attention from source (this may take a while) ==="
             pip install flash-attn --no-build-isolation --no-cache-dir
         }
     fi
-    
+
     # Install project requirements
     echo "=== Installing project requirements ==="
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -174,7 +169,7 @@ if ! conda env list | grep -q "^vecformer "; then
             pip install spconv-cu124 2>/dev/null || pip install spconv-cu120
         fi
     fi
-    
+
     echo ""
     echo "=== Environment setup complete ==="
 else
@@ -198,7 +193,7 @@ export TORCH_CUDA_ARCH_LIST="$GPU_ARCH"
 
 # Set PYTHONPATH for the project
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
+export PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH:-}"
 
 # Print summary
 python - <<'PYCODE'
@@ -206,7 +201,7 @@ import torch
 import os
 
 print("\n" + "="*50)
-print("VecFormer environment activated (WSL)")
+print("VecFormer environment activated (Ubuntu)")
 print("="*50)
 print(f"PyTorch: {torch.__version__} | CUDA: {torch.version.cuda}")
 if torch.cuda.is_available():

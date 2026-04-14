@@ -12,3 +12,6 @@ tensorboardX==2.6.4
 tensorboard==2.20.0
 gdown==5.2.0
 wandb>=0.15.0
+nvidia-ml-py
+# mmcv requires special install (CUDA ops skipped — only track_parallel_progress is used):
+#   MMCV_WITH_OPS=0 pip install mmcv==1.7.2 --no-build-isolation

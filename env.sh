@@ -66,7 +66,11 @@ if ! conda env list | grep -q "^vecformer "; then
     echo "=== Installing project requirements ==="
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     pip install -r "$SCRIPT_DIR/requirements.txt"
-    
+
+    # Install mmcv (CUDA ops skipped — only track_parallel_progress is used)
+    echo "=== Installing mmcv ==="
+    MMCV_WITH_OPS=0 pip install mmcv==1.7.2 --no-build-isolation
+
     echo ""
     echo "=== Environment setup complete ==="
 else
