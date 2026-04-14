@@ -82,3 +82,4 @@ results/**/*.svg
 /results/FinetuneV2
 /configs/cp_192
 /configs/finetunev2_best
+/results
